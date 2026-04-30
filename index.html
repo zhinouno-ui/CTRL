@@ -536,9 +536,16 @@
       pinNuevo
     });
 
-    if (r.ok) {
-      setMsg("cambiarPinMsg", "PIN actualizado correctamente.");
-      setTimeout(ocultarCambioPin, 1500);
+    if (r.mensaje === "API activa") {
+      setMsg("cambiarPinMsg", "El Apps Script deployed NO tiene la acción 'cambiarpin'. Necesitás crear una NUEVA implementación (no solo guardar el código).");
+      return;
+    }
+
+    if (r.ok && r.debug && r.debug.nuevoValor) {
+      setMsg("cambiarPinMsg", `PIN actualizado correctamente (fila ${r.debug.fila}, valor: ${r.debug.nuevoValor}).`);
+      setTimeout(ocultarCambioPin, 2500);
+    } else if (r.ok) {
+      setMsg("cambiarPinMsg", "Respuesta ok pero sin confirmación de escritura. Revisá la implementación del Apps Script.");
     } else {
       const debug = r.debug ? "\nDEBUG: " + JSON.stringify(r.debug) : "";
       setMsg("cambiarPinMsg", (r.error || "No se pudo actualizar el PIN.") + debug);

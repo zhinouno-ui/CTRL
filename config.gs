@@ -481,8 +481,20 @@ function cambiarPin_(datos) {
         return { ok: false, error: 'PIN actual incorrecto.', debug: { pinEnSheet, pinActual } };
       }
 
-      sh.getRange(i + 1, pinIdx + 1).setValue(pinNuevo);
-      return { ok: true };
+      const celda = sh.getRange(i + 1, pinIdx + 1);
+      celda.setValue(pinNuevo);
+      SpreadsheetApp.flush();
+
+      const verificar = String(celda.getValue());
+      if (verificar !== pinNuevo) {
+        return {
+          ok: false,
+          error: 'No se persistió el cambio en la hoja.',
+          debug: { fila: i + 1, columna: pinIdx + 1, escrito: pinNuevo, leido: verificar }
+        };
+      }
+
+      return { ok: true, debug: { fila: i + 1, columna: pinIdx + 1, nuevoValor: verificar } };
     }
   }
 
