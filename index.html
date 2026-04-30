@@ -148,6 +148,90 @@
       color: #bbb;
       font-size: 13px;
     }
+
+    /* FLOATING WIDGET */
+    #floatWidget {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      z-index: 9999;
+      user-select: none;
+    }
+
+    #floatWidget .fw-gear {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: #4b5cff;
+      border: none;
+      font-size: 22px;
+      cursor: grab;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 16px rgba(0,0,0,.5);
+      transition: background .2s;
+    }
+
+    #floatWidget .fw-gear:active {
+      cursor: grabbing;
+    }
+
+    #floatWidget .fw-gear:hover {
+      background: #3a4bdd;
+    }
+
+    #floatWidget .fw-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    #floatWidget .fw-actions.hidden {
+      display: none;
+    }
+
+    .fw-btn {
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 3px 10px rgba(0,0,0,.4);
+      position: relative;
+      transition: transform .15s, background .2s;
+    }
+
+    .fw-btn:hover {
+      transform: scale(1.1);
+    }
+
+    .fw-btn .fw-tooltip {
+      position: absolute;
+      right: 58px;
+      background: #222;
+      color: #fff;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .15s;
+    }
+
+    .fw-btn:hover .fw-tooltip {
+      opacity: 1;
+    }
+
+    .fw-btn-bano  { background: #1a73e8; }
+    .fw-btn-fumar { background: #5f6368; }
   </style>
 </head>
 
@@ -179,14 +263,32 @@
       <button class="secondary" onclick="cerrarSesion()">Cerrar sesión</button>
     </div>
 
+    <!-- CAMBIO DE PIN -->
+    <div class="card hidden" id="cambiarPinCard">
+      <h3>Cambiar PIN</h3>
+
+      <label>PIN actual</label>
+      <input id="pinActual" type="password" placeholder="PIN actual" />
+
+      <label>PIN nuevo</label>
+      <input id="pinNuevo" type="password" placeholder="PIN nuevo" />
+
+      <label>Confirmar PIN nuevo</label>
+      <input id="pinNuevoConfirm" type="password" placeholder="Repetir PIN nuevo" />
+
+      <div class="row">
+        <button class="primary" onclick="cambiarPin()">Guardar</button>
+        <button class="secondary" onclick="ocultarCambioPin()">Cancelar</button>
+      </div>
+
+      <div id="cambiarPinMsg" class="msg"></div>
+    </div>
+
     <!-- ACCIONES -->
     <div class="card">
       <h3>Acciones rápidas</h3>
 
       <div class="row">
-        <button onclick="ficharIngreso()">Fichar ingreso</button>
-        <button class="danger" onclick="ficharSalida()">Fichar salida</button>
-
         <button class="warning" onclick="banoInicio()">Voy al baño</button>
         <button class="success" onclick="banoFin()">Volví del baño</button>
 
@@ -195,6 +297,12 @@
       </div>
 
       <div id="accionMsg" class="msg"></div>
+    </div>
+
+    <!-- HISTORIAL DE PAUSAS -->
+    <div class="card">
+      <h3>Mi historial de hoy</h3>
+      <div id="historialBox"><span class="small">Sin registros todavía.</span></div>
     </div>
 
     <!-- NOVEDADES -->
@@ -299,8 +407,23 @@
   </div>
 </div>
 
+<!-- FLOATING WIDGET -->
+<div id="floatWidget" class="hidden">
+  <div class="fw-actions hidden" id="fwActions">
+    <button class="fw-btn fw-btn-bano" id="fwBanoBtn" onclick="fwToggleBano()">
+      🚿
+      <span class="fw-tooltip" id="fwBanoTip">Baño</span>
+    </button>
+    <button class="fw-btn fw-btn-fumar" id="fwFumarBtn" onclick="fwToggleFumar()">
+      🚬
+      <span class="fw-tooltip" id="fwFumarTip">Fumar</span>
+    </button>
+  </div>
+  <button class="fw-gear" id="fwGear" onclick="fwToggle()">⚙️</button>
+</div>
+
 <script>
-  const API_URL = "https://script.google.com/macros/s/AKfycbzeVpQRn39hBzPCItnYCsoKddlYFvADoX4Z2_CTvYdi-znHVts_8OX10noLmB3JU4hx/exec";
+  const API_URL = "https://script.google.com/macros/s/AKfycbzrZkLQ6Wbd2EOmxlfwddutB6yPzajPkBuqx3iI8D2HGmiytW6RzCtWUBloAMYX7a4i/exec";
 
   let operador = JSON.parse(localStorage.getItem("operadorActivo") || "null");
 
@@ -354,6 +477,8 @@
     operador = r.operador;
     localStorage.setItem("operadorActivo", JSON.stringify(operador));
 
+    await api({ action: "ficharingreso", nombre: operador.nombre });
+
     mostrarApp();
   }
 
@@ -363,110 +488,173 @@
 
     document.getElementById("operadorInfo").innerHTML = `
       <span class="badge"><b>${operador.nombre}</b></span>
+      <button class="secondary" style="width:auto;padding:6px 14px;margin:0 0 0 8px;font-size:13px;" onclick="mostrarCambioPin()">🔑 Cambiar PIN</button>
       <span class="badge">Turno: ${operador.turno}</span>
       <span class="badge">PC: ${operador.pc}</span>
       <span class="badge">Tipo: ${operador.tipo}</span>
     `;
 
     cargarNovedades();
+    historialRenderizar(historialCargar());
+    fwMostrar();
+    fwActualizarTooltips();
   }
 
-  function cerrarSesion() {
+  function mostrarCambioPin() {
+    document.getElementById("cambiarPinCard").classList.remove("hidden");
+    document.getElementById("pinActual").value = "";
+    document.getElementById("pinNuevo").value = "";
+    document.getElementById("pinNuevoConfirm").value = "";
+    setMsg("cambiarPinMsg", "");
+  }
+
+  function ocultarCambioPin() {
+    document.getElementById("cambiarPinCard").classList.add("hidden");
+  }
+
+  async function cambiarPin() {
+    const pinActual = document.getElementById("pinActual").value.trim();
+    const pinNuevo = document.getElementById("pinNuevo").value.trim();
+    const pinConfirm = document.getElementById("pinNuevoConfirm").value.trim();
+
+    if (!pinActual || !pinNuevo || !pinConfirm) {
+      setMsg("cambiarPinMsg", "Completá todos los campos.");
+      return;
+    }
+
+    if (pinNuevo !== pinConfirm) {
+      setMsg("cambiarPinMsg", "Los PINs nuevos no coinciden.");
+      return;
+    }
+
+    setMsg("cambiarPinMsg", "Guardando...");
+
+    const r = await api({
+      action: "cambiarpin",
+      nombre: operador.nombre,
+      pinActual,
+      pinNuevo
+    });
+
+    if (r.ok) {
+      setMsg("cambiarPinMsg", "PIN actualizado correctamente.");
+      setTimeout(ocultarCambioPin, 1500);
+    } else {
+      setMsg("cambiarPinMsg", r.error || "No se pudo actualizar el PIN.");
+    }
+  }
+
+  async function cerrarSesion() {
+    await api({ action: "ficharsalida", nombre: operador.nombre });
     localStorage.removeItem("operadorActivo");
+    localStorage.removeItem("historialPausas");
     operador = null;
     location.reload();
   }
 
-  async function ficharIngreso() {
-    setMsg("accionMsg", "Registrando ingreso...");
-
-    const r = await api({
-      action: "ficharingreso",
-      nombre: operador.nombre
-    });
-
-    setMsg(
-      "accionMsg",
-      r.ok
-        ? `Ingreso registrado.\nEstado: ${r.estado || ""}\nHora: ${r.hora || ""}`
-        : r.error
-    );
+  // HISTORIAL
+  function historialCargar() {
+    const hoy = new Date().toLocaleDateString("es-AR");
+    const raw = localStorage.getItem("historialPausas");
+    let data = null;
+    try { data = JSON.parse(raw); } catch(e) {}
+    if (!data || data.fecha !== hoy) {
+      data = { fecha: hoy, items: [] };
+      localStorage.setItem("historialPausas", JSON.stringify(data));
+    }
+    return data;
   }
 
-  async function ficharSalida() {
-    setMsg("accionMsg", "Registrando salida...");
+  function historialAgregar(item) {
+    const data = historialCargar();
+    data.items.push(item);
+    localStorage.setItem("historialPausas", JSON.stringify(data));
+    historialRenderizar(data);
+  }
 
-    const r = await api({
-      action: "ficharsalida",
-      nombre: operador.nombre
-    });
+  function historialActualizarUltimo(campos) {
+    const data = historialCargar();
+    const ultimo = data.items.findLast(i => i.tipo === campos.tipo && !i.fin);
+    if (ultimo) Object.assign(ultimo, campos);
+    localStorage.setItem("historialPausas", JSON.stringify(data));
+    historialRenderizar(data);
+  }
 
-    if (r.ok) {
-      alert("Salida registrada correctamente.");
-      cerrarSesion();
-    } else {
-      setMsg("accionMsg", r.error || "No se pudo registrar salida.");
+  function historialRenderizar(data) {
+    const box = document.getElementById("historialBox");
+    if (!data || !data.items.length) {
+      box.innerHTML = `<span class="small">Sin registros todavía.</span>`;
+      return;
     }
+
+    box.innerHTML = data.items.map(i => {
+      const icono = i.tipo === "baño" ? "🚿" : "🚬";
+      const duracion = i.minutos != null
+        ? `${i.minutos} min${i.excedio === "Sí" ? " ⚠️" : ""}`
+        : "en curso...";
+      const fin = i.fin ? ` → ${i.fin}` : "";
+      return `<div class="novedad" style="padding:10px 14px;margin-bottom:8px;">
+        ${icono} <b>${i.tipo === "baño" ? "Baño" : "Fumar"}</b>
+        &nbsp;·&nbsp; Inicio: ${i.inicio}${fin}
+        &nbsp;·&nbsp; <span class="small">${duracion}</span>
+      </div>`;
+    }).join("");
   }
 
   async function banoInicio() {
     setMsg("accionMsg", "Registrando salida al baño...");
 
-    const r = await api({
-      action: "banoinicio",
-      nombre: operador.nombre
-    });
+    const r = await api({ action: "banoinicio", nombre: operador.nombre });
 
-    setMsg(
-      "accionMsg",
-      r.ok ? `Baño iniciado: ${r.inicio || ""}` : r.error
-    );
+    if (r.ok) {
+      historialAgregar({ tipo: "baño", inicio: r.inicio || horaActual_() });
+      setMsg("accionMsg", `Baño iniciado: ${r.inicio || ""}`);
+    } else {
+      setMsg("accionMsg", r.error);
+    }
   }
 
   async function banoFin() {
     setMsg("accionMsg", "Registrando regreso del baño...");
 
-    const r = await api({
-      action: "banofin",
-      nombre: operador.nombre
-    });
+    const r = await api({ action: "banofin", nombre: operador.nombre });
 
-    setMsg(
-      "accionMsg",
-      r.ok
-        ? `Regreso del baño registrado.\nMinutos: ${r.minutos}\nExcedió: ${r.excedio}`
-        : r.error
-    );
+    if (r.ok) {
+      historialActualizarUltimo({ tipo: "baño", fin: r.regreso || horaActual_(), minutos: r.minutos, excedio: r.excedio });
+      setMsg("accionMsg", `Regreso del baño.\nMinutos: ${r.minutos}\nExcedió: ${r.excedio}`);
+    } else {
+      setMsg("accionMsg", r.error);
+    }
   }
 
   async function fumarInicio() {
     setMsg("accionMsg", "Registrando salida a fumar...");
 
-    const r = await api({
-      action: "fumarinicio",
-      nombre: operador.nombre
-    });
+    const r = await api({ action: "fumarinicio", nombre: operador.nombre });
 
-    setMsg(
-      "accionMsg",
-      r.ok ? `Pausa fumar iniciada: ${r.inicio || ""}` : r.error
-    );
+    if (r.ok) {
+      historialAgregar({ tipo: "fumar", inicio: r.inicio || horaActual_() });
+      setMsg("accionMsg", `Fumar iniciado: ${r.inicio || ""}`);
+    } else {
+      setMsg("accionMsg", r.error);
+    }
   }
 
   async function fumarFin() {
     setMsg("accionMsg", "Registrando regreso de fumar...");
 
-    const r = await api({
-      action: "fumarfin",
-      nombre: operador.nombre
-    });
+    const r = await api({ action: "fumarfin", nombre: operador.nombre });
 
-    setMsg(
-      "accionMsg",
-      r.ok
-        ? `Regreso de fumar registrado.\nMinutos: ${r.minutos}\nExcedió: ${r.excedio}`
-        : r.error
-    );
+    if (r.ok) {
+      historialActualizarUltimo({ tipo: "fumar", fin: r.regreso || horaActual_(), minutos: r.minutos, excedio: r.excedio });
+      setMsg("accionMsg", `Regreso de fumar.\nMinutos: ${r.minutos}\nExcedió: ${r.excedio}`);
+    } else {
+      setMsg("accionMsg", r.error);
+    }
+  }
+
+  function horaActual_() {
+    return new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
 
   async function guardarRecepcion() {
@@ -598,6 +786,97 @@
   setInterval(() => {
     if (operador) cargarNovedades();
   }, 60000);
+
+  // FLOATING WIDGET
+  const fwWidget = document.getElementById("floatWidget");
+  const fwActions = document.getElementById("fwActions");
+  let fwOpen = false;
+  let pausaBano = false;
+  let pausaFumar = false;
+
+  function fwMostrar() {
+    fwWidget.classList.remove("hidden");
+  }
+
+  function fwToggle() {
+    fwOpen = !fwOpen;
+    fwActions.classList.toggle("hidden", !fwOpen);
+  }
+
+  function fwActualizarTooltips() {
+    document.getElementById("fwBanoTip").innerText  = pausaBano  ? "Finalizar baño"  : "Iniciar baño";
+    document.getElementById("fwFumarTip").innerText = pausaFumar ? "Finalizar fumar" : "Iniciar fumar";
+    document.getElementById("fwBanoBtn").style.background  = pausaBano  ? "#16a765" : "#1a73e8";
+    document.getElementById("fwFumarBtn").style.background = pausaFumar ? "#16a765" : "#5f6368";
+  }
+
+  async function fwToggleBano() {
+    setMsg("accionMsg", pausaBano ? "Registrando regreso del baño..." : "Registrando salida al baño...");
+    const r = await api({ action: pausaBano ? "banofin" : "banoinicio", nombre: operador.nombre });
+
+    if (r.ok) {
+      if (!pausaBano) {
+        historialAgregar({ tipo: "baño", inicio: r.inicio || horaActual_() });
+      } else {
+        historialActualizarUltimo({ tipo: "baño", fin: r.regreso || horaActual_(), minutos: r.minutos, excedio: r.excedio });
+      }
+      pausaBano = !pausaBano;
+      fwActualizarTooltips();
+      setMsg("accionMsg", pausaBano
+        ? `Baño iniciado: ${r.inicio || ""}`
+        : `Regreso del baño. Minutos: ${r.minutos} · Excedió: ${r.excedio}`
+      );
+    } else {
+      setMsg("accionMsg", r.error || "Error.");
+    }
+  }
+
+  async function fwToggleFumar() {
+    setMsg("accionMsg", pausaFumar ? "Registrando regreso de fumar..." : "Registrando salida a fumar...");
+    const r = await api({ action: pausaFumar ? "fumarfin" : "fumarinicio", nombre: operador.nombre });
+
+    if (r.ok) {
+      if (!pausaFumar) {
+        historialAgregar({ tipo: "fumar", inicio: r.inicio || horaActual_() });
+      } else {
+        historialActualizarUltimo({ tipo: "fumar", fin: r.regreso || horaActual_(), minutos: r.minutos, excedio: r.excedio });
+      }
+      pausaFumar = !pausaFumar;
+      fwActualizarTooltips();
+      setMsg("accionMsg", pausaFumar
+        ? `Fumar iniciado: ${r.inicio || ""}`
+        : `Regreso de fumar. Minutos: ${r.minutos} · Excedió: ${r.excedio}`
+      );
+    } else {
+      setMsg("accionMsg", r.error || "Error.");
+    }
+  }
+
+  // Drag
+  const gear = document.getElementById("fwGear");
+  let dragging = false, dragStartX, dragStartY, widgetStartX, widgetStartY;
+
+  gear.addEventListener("mousedown", e => {
+    dragging = true;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    const rect = fwWidget.getBoundingClientRect();
+    widgetStartX = rect.left;
+    widgetStartY = rect.top;
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", e => {
+    if (!dragging) return;
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+    fwWidget.style.left   = (widgetStartX + dx) + "px";
+    fwWidget.style.top    = (widgetStartY + dy) + "px";
+    fwWidget.style.right  = "auto";
+    fwWidget.style.bottom = "auto";
+  });
+
+  document.addEventListener("mouseup", () => { dragging = false; });
 </script>
 </body>
 </html>
