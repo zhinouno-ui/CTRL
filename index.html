@@ -540,7 +540,8 @@
       setMsg("cambiarPinMsg", "PIN actualizado correctamente.");
       setTimeout(ocultarCambioPin, 1500);
     } else {
-      setMsg("cambiarPinMsg", r.error || "No se pudo actualizar el PIN.");
+      const debug = r.debug ? "\nDEBUG: " + JSON.stringify(r.debug) : "";
+      setMsg("cambiarPinMsg", (r.error || "No se pudo actualizar el PIN.") + debug);
     }
   }
 

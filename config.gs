@@ -464,7 +464,11 @@ function cambiarPin_(datos) {
   const pinIdx = headers.findIndex(h => String(h).trim().toLowerCase() === 'pin');
   const activoIdx = headers.findIndex(h => String(h).trim().toLowerCase() === 'activo');
 
-  if (nombreIdx === -1 || pinIdx === -1) return { ok: false, error: 'Estructura de hoja incorrecta.' };
+  if (nombreIdx === -1 || pinIdx === -1) return {
+    ok: false,
+    error: 'Estructura de hoja incorrecta.',
+    debug: { headers: headers.map(h => String(h)) }
+  };
 
   for (let i = 3; i < values.length; i++) {
     const row = values[i];
@@ -472,8 +476,9 @@ function cambiarPin_(datos) {
     const activo = activoIdx !== -1 ? esSi_(row[activoIdx]) : true;
 
     if (nombreFila === nombre.toLowerCase() && activo) {
-      if (String(row[pinIdx]) !== pinActual) {
-        return { ok: false, error: 'PIN actual incorrecto.' };
+      const pinEnSheet = String(row[pinIdx]);
+      if (pinEnSheet !== pinActual) {
+        return { ok: false, error: 'PIN actual incorrecto.', debug: { pinEnSheet, pinActual } };
       }
 
       sh.getRange(i + 1, pinIdx + 1).setValue(pinNuevo);
@@ -481,7 +486,11 @@ function cambiarPin_(datos) {
     }
   }
 
-  return { ok: false, error: 'Operador no encontrado.' };
+  return {
+    ok: false,
+    error: 'Operador no encontrado.',
+    debug: { nombre, nombresBuscados: values.slice(3).map(r => String(r[nombreIdx] || '')) }
+  };
 }
 
 function generarIdNovedad_() {
