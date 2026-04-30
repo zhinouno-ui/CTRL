@@ -434,9 +434,9 @@
   };
 
   async function api(params) {
-    const url = API_URL + "?" + new URLSearchParams(params).toString();
+    const url = API_URL + "?" + new URLSearchParams({ ...params, _t: Date.now() }).toString();
 
-    const res = await fetch(url);
+    const res = await fetch(url, { cache: "no-store" });
     const text = await res.text();
 
     try {
