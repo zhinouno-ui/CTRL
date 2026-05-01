@@ -243,6 +243,8 @@ function cerrarSesionesExpiradas_() {
     const ult = ultimosPorOperador[key];
     if (ult.accion === 'Ingreso' && ult.timestamp instanceof Date) {
       if (ahora - ult.timestamp > limiteMs) {
+        const pausasCerradas = cerrarPausasAbiertasDe_(ult.nombre);
+
         sh.appendRow([
           new Date(),
           fecha_(ahora),
@@ -254,7 +256,8 @@ function cerrarSesionesExpiradas_() {
           hora_(ahora),
           'Salida forzosa',
           '',
-          'Cerrado automáticamente: turno expirado'
+          'Turno expirado'
+            + (pausasCerradas.length ? ' · cierre auto de pausas: ' + pausasCerradas.join(', ') : '')
         ]);
         cerrados.push(ult.nombre);
       }
@@ -298,6 +301,8 @@ function ficharSalida_(datos) {
   const op = getOperador_(datos.nombre);
   if (!op) return { ok: false, error: 'Operador no encontrado.' };
 
+  const cerradas = cerrarPausasAbiertasDe_(op.Nombre);
+
   const ahora = new Date();
 
   hoja_(HOJAS.FICHAJES).appendRow([
@@ -311,10 +316,60 @@ function ficharSalida_(datos) {
     hora_(ahora),
     'Salida OK',
     '',
-    datos.observaciones || ''
+    cerradas.length
+      ? 'Salida + cierre auto de pausas: ' + cerradas.join(', ')
+      : (datos.observaciones || '')
   ]);
 
-  return { ok: true, accion: 'Salida', hora: hora_(ahora) };
+  return { ok: true, accion: 'Salida', hora: hora_(ahora), pausasCerradas: cerradas };
+}
+
+function cerrarPausasAbiertasDe_(nombreOperador) {
+  const cerradas = [];
+  const nombreLower = String(nombreOperador || '').trim().toLowerCase();
+  if (!nombreLower) return cerradas;
+
+  const hojas = [
+    { nombre: HOJAS.BANOS,    label: 'baño' },
+    { nombre: HOJAS.FUMAR,    label: 'fumar' },
+    { nombre: HOJAS.LIMPIEZA, label: 'limpieza' }
+  ];
+
+  hojas.forEach(h => {
+    let sh;
+    try { sh = hoja_(h.nombre); } catch (e) { return; }
+
+    const values = sh.getDataRange().getValues();
+    const ahora = new Date();
+    const horaRegreso = hora_(ahora);
+
+    for (let i = values.length - 1; i >= 3; i--) {
+      const op = String(values[i][2] || '').trim().toLowerCase();
+      const estado = values[i][9];
+      const tsInicio = values[i][0];
+      const horaSalida = values[i][5];
+
+      if (op !== nombreLower || estado !== 'Abierta') continue;
+
+      let minutos = 0;
+      if (tsInicio instanceof Date) {
+        minutos = Math.max(0, Math.ceil((ahora - tsInicio) / 60000));
+      } else {
+        minutos = calcularMinutosEntreHoras_(String(horaSalida), horaRegreso);
+      }
+      const excedio = minutos > 10 ? 'Sí' : 'No';
+
+      sh.getRange(i + 1, 7).setValue(horaRegreso);
+      sh.getRange(i + 1, 8).setValue(minutos);
+      sh.getRange(i + 1, 9).setValue(excedio);
+      sh.getRange(i + 1, 10).setValue('Cerrada (auto)');
+
+      cerradas.push(h.label);
+    }
+  });
+
+  if (cerradas.length) SpreadsheetApp.flush();
+  return cerradas;
 }
 
 function banoInicio_(datos) {
@@ -356,6 +411,7 @@ function iniciarPausa_(datos, hojaNombre, tipoPausa, opciones) {
   for (let i = values.length - 1; i >= 3; i--) {
     const operadorRow = values[i][2];
     const pcRow = values[i][4];
+    const tsInicio = values[i][0];
     const estado = values[i][9];
 
     if (estado !== 'Abierta') continue;
@@ -368,9 +424,19 @@ function iniciarPausa_(datos, hojaNombre, tipoPausa, opciones) {
     }
 
     if (bloqueoCruzado) {
+      let minutosAbierta = '?';
+      if (tsInicio instanceof Date) {
+        minutosAbierta = Math.max(0, Math.floor((new Date() - tsInicio) / 60000));
+      }
+
       return {
         ok: false,
-        error: 'Ya hay alguien en ' + tipoPausa + ' (' + operadorRow + ' · ' + pcRow + '). Esperá a que termine.'
+        bloqueoCruzado: true,
+        bloqueador: { operador: operadorRow, pc: pcRow, minutos: minutosAbierta, tipo: tipoPausa },
+        error:
+          'PC ' + pcRow + ' tiene una pausa de ' + tipoPausa + ' abierta hace ' + minutosAbierta + ' min ('
+          + operadorRow + '). Esperá a que regrese y la cierre antes de salir. '
+          + 'Si ya terminó, avisale a ' + operadorRow + ' que cierre la pausa desde su PC.'
       };
     }
   }

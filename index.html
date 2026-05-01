@@ -301,7 +301,7 @@
       <h3>Acciones rápidas</h3>
 
       <div class="row">
-        <button id="banoBtn"     class="warning" onclick="banoToggle()">🚿 Voy al baño</button>
+        <button id="banoBtn"     class="warning" onclick="banoToggle()">🚽 Voy al baño</button>
         <button id="fumarBtn"    class="warning" onclick="fumarToggle()">🚬 Voy a fumar</button>
         <button id="limpiezaBtn" class="warning" onclick="limpiezaToggle()">🧹 Iniciar limpieza</button>
       </div>
@@ -427,7 +427,7 @@
 <div id="floatWidget" class="hidden">
   <div class="fw-actions hidden" id="fwActions">
     <button class="fw-btn fw-btn-bano" id="fwBanoBtn" onclick="banoToggle()">
-      🚿
+      🚽
       <span class="fw-tooltip" id="fwBanoTip">Baño</span>
     </button>
     <button class="fw-btn fw-btn-fumar" id="fwFumarBtn" onclick="fumarToggle()">
@@ -641,23 +641,27 @@
     if (operador && operador.nombre) {
       localStorage.setItem("operadorAnterior", operador.nombre);
     }
-    await api({ action: "ficharsalida", nombre: operador.nombre });
+    const r = await api({ action: "ficharsalida", nombre: operador.nombre });
+    if (r && r.pausasCerradas && r.pausasCerradas.length) {
+      alert("Se cerraron pausas abiertas: " + r.pausasCerradas.join(", "));
+    }
     localStorage.removeItem("operadorActivo");
     localStorage.removeItem("historialPausas");
     operador = null;
     location.reload();
   }
 
-  // HISTORIAL
+  // HISTORIAL — persiste durante toda la sesión del operador,
+  // se borra solo al cerrar sesión (no por cambio de día / medianoche)
   function historialCargar() {
-    const hoy = new Date().toLocaleDateString("es-AR");
     const raw = localStorage.getItem("historialPausas");
     let data = null;
     try { data = JSON.parse(raw); } catch(e) {}
-    if (!data || data.fecha !== hoy) {
-      data = { fecha: hoy, items: [] };
+    if (!data) {
+      data = { items: [] };
       localStorage.setItem("historialPausas", JSON.stringify(data));
     }
+    if (!data.items) data.items = [];
     return data;
   }
 
@@ -683,7 +687,7 @@
       return;
     }
 
-    const iconos = { "baño": "🚿", "fumar": "🚬", "limpieza": "🧹" };
+    const iconos = { "baño": "🚽", "fumar": "🚬", "limpieza": "🧹" };
     const labels = { "baño": "Baño", "fumar": "Fumar", "limpieza": "Limpieza" };
 
     box.innerHTML = data.items.map(i => {
@@ -700,7 +704,7 @@
   }
 
   const PAUSAS_CONFIG = {
-    bano:     { tipo: "baño",     accionInicio: "banoinicio",     accionFin: "banofin",     labelInicio: "🚿 Voy al baño",      labelFin: "🚿 Volví del baño",  fwTipInicio: "Iniciar baño",     fwTipFin: "Finalizar baño",     mainBtn: "banoBtn",     fwBtn: "fwBanoBtn",     fwTip: "fwBanoTip" },
+    bano:     { tipo: "baño",     accionInicio: "banoinicio",     accionFin: "banofin",     labelInicio: "🚽 Voy al baño",      labelFin: "🚽 Volví del baño",  fwTipInicio: "Iniciar baño",     fwTipFin: "Finalizar baño",     mainBtn: "banoBtn",     fwBtn: "fwBanoBtn",     fwTip: "fwBanoTip" },
     fumar:    { tipo: "fumar",    accionInicio: "fumarinicio",    accionFin: "fumarfin",    labelInicio: "🚬 Voy a fumar",      labelFin: "🚬 Volví de fumar",  fwTipInicio: "Iniciar fumar",    fwTipFin: "Finalizar fumar",    mainBtn: "fumarBtn",    fwBtn: "fwFumarBtn",    fwTip: "fwFumarTip" },
     limpieza: { tipo: "limpieza", accionInicio: "limpiezainicio", accionFin: "limpiezafin", labelInicio: "🧹 Iniciar limpieza", labelFin: "🧹 Terminar limpieza", fwTipInicio: "Iniciar limpieza", fwTipFin: "Finalizar limpieza", mainBtn: "limpiezaBtn", fwBtn: "fwLimpiezaBtn", fwTip: "fwLimpiezaTip" }
   };
@@ -719,6 +723,7 @@
 
     if (!r.ok) {
       setMsg("accionMsg", r.error || "Error.");
+      if (r.bloqueoCruzado) alert("⚠️ " + r.error);
       return;
     }
 
