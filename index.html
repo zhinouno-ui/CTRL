@@ -251,7 +251,7 @@
     <input id="loginPin" type="password" placeholder="PIN" />
 
     <div id="pcSelectorWrap" class="hidden">
-      <label>PC en la que te sentás (franquero)</label>
+      <label id="pcSelectorLabel">PC en la que te sentás</label>
       <select id="pcSelector"></select>
     </div>
 
@@ -472,6 +472,8 @@
     if (el) el.innerText = msg || "";
   }
 
+  let _modoCoberturaActivo = false;
+
   async function login() {
     const nombre = document.getElementById("loginNombre").value.trim();
     const pin = document.getElementById("loginPin").value.trim();
@@ -484,19 +486,36 @@
 
     setMsg("loginMsg", "Validando...");
 
-    const r = await api({ action: "login", nombre, pin, pcAsignada });
+    const r = await api({ action: "login", nombre, pin, pcAsignada, modoCovertura: _modoCoberturaActivo });
 
     if (!r.ok) {
       setMsg("loginMsg", r.error || "No se pudo ingresar.");
       return;
     }
 
-    if (r.requierePcSelector) {
-      await mostrarSelectorPC();
-      setMsg("loginMsg", "Sos franquero, elegí en qué PC te sentás y volvé a presionar Ingresar.");
+    if (r.requiereConfirmacionCobertura) {
+      const confirma = confirm(
+        `Ya tenés una sesión activa en PC ${r.sesionActiva.pc} desde las ${r.sesionActiva.hora}.\n\n¿Querés cubrir otra PC?`
+      );
+      if (confirma) {
+        _modoCoberturaActivo = true;
+        setMsg("loginMsg", "Modo cobertura activo. Presioná Ingresar nuevamente.");
+      } else {
+        setMsg("loginMsg", `Iniciá sesión desde PC ${r.sesionActiva.pc}.`);
+      }
       return;
     }
 
+    if (r.requierePcSelector) {
+      await mostrarSelectorPC(_modoCoberturaActivo);
+      setMsg("loginMsg", _modoCoberturaActivo
+        ? "Modo cobertura: elegí qué PC vas a cubrir y presioná Ingresar."
+        : "Sos franquero, elegí en qué PC te sentás y volvé a presionar Ingresar."
+      );
+      return;
+    }
+
+    _modoCoberturaActivo = false;
     operador = r.operador;
     localStorage.setItem("operadorActivo", JSON.stringify(operador));
 
@@ -509,9 +528,10 @@
     mostrarApp();
   }
 
-  async function mostrarSelectorPC() {
+  async function mostrarSelectorPC(esCobertura) {
     const wrap = document.getElementById("pcSelectorWrap");
     const sel = document.getElementById("pcSelector");
+    const label = document.getElementById("pcSelectorLabel");
     const r = await api({ action: "getpcs" });
     sel.innerHTML = "";
     (r.pcs || []).forEach(p => {
@@ -520,6 +540,7 @@
       opt.textContent = p.pc;
       sel.appendChild(opt);
     });
+    label.textContent = esCobertura ? "PC que vas a cubrir" : "PC en la que te sentás (franquero)";
     wrap.classList.remove("hidden");
   }
 
@@ -532,7 +553,7 @@
       <button class="secondary" style="width:auto;padding:6px 14px;margin:0 0 0 8px;font-size:13px;" onclick="mostrarCambioPin()">🔑 Cambiar PIN</button>
       <span class="badge">Turno: ${operador.turno}</span>
       <span class="badge">PC: ${operador.pc}</span>
-      <span class="badge">Tipo: ${operador.tipo}</span>
+      <span class="badge">${operador.modoCovertura ? 'Cubriendo' : 'Tipo: ' + operador.tipo}</span>
     `;
 
     const ant = localStorage.getItem("operadorAnterior") || "";

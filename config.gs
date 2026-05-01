@@ -92,6 +92,7 @@ function normalizarDatos_(data) {
     pinNuevo: data.pinNuevo || '',
 
     pcAsignada: data.pcAsignada || '',
+    modoCovertura: data.modoCovertura === true || data.modoCovertura === 'true',
 
     id: data.id || '',
     estado: data.estado || '',
@@ -177,6 +178,41 @@ function esFranquero_(op) {
   return String(op && op.Tipo || '').trim().toLowerCase().indexOf('franq') !== -1;
 }
 
+function obtenerSesionActiva_(nombreOperador) {
+  const sh = hoja_(HOJAS.FICHAJES);
+  const values = sh.getDataRange().getValues();
+  if (values.length < 4) return null;
+
+  const nombreLower = String(nombreOperador || '').trim().toLowerCase();
+  const ahora = new Date();
+  const limiteMs = HORAS_MAX_FICHAJE * 3600 * 1000;
+
+  // Find the most recent entry for this operator
+  for (let i = values.length - 1; i >= 3; i--) {
+    const ts = values[i][0];
+    const nombre = String(values[i][2] || '').trim().toLowerCase();
+    const accion = values[i][6];
+
+    if (nombre !== nombreLower) continue;
+
+    // Found the most recent entry for this operator
+    if (accion === 'Ingreso' && ts instanceof Date) {
+      // Check if it's within the 9-hour window
+      if (ahora - ts <= limiteMs) {
+        return {
+          pc: values[i][4],
+          hora: values[i][7],
+          minutos: Math.max(0, Math.ceil((ahora - ts) / 60000))
+        };
+      }
+    }
+
+    break; // We found the most recent entry, stop looking
+  }
+
+  return null;
+}
+
 function login_(datos) {
   const op = getOperador_(datos.nombre);
 
@@ -187,11 +223,29 @@ function login_(datos) {
     return { ok: true, requierePcSelector: true };
   }
 
-  const pcFinal = esFranquero_(op)
+  const cierres = cerrarSesionesExpiradas_();
+
+  // Check dual login only for fixed operators (franqueros can have multiple sessions)
+  if (!esFranquero_(op)) {
+    const sesionActiva = obtenerSesionActiva_(op.Nombre);
+    if (sesionActiva) {
+      if (!datos.modoCovertura) {
+        return {
+          ok: true,
+          requiereConfirmacionCobertura: true,
+          sesionActiva: { pc: sesionActiva.pc, hora: sesionActiva.hora }
+        };
+      }
+      // Coverage mode confirmed but PC not selected yet
+      if (!datos.pcAsignada) {
+        return { ok: true, requierePcSelector: true, modoCovertura: true };
+      }
+    }
+  }
+
+  const pcFinal = (esFranquero_(op) || datos.modoCovertura)
     ? String(datos.pcAsignada).trim().toUpperCase()
     : op.PC;
-
-  const cierres = cerrarSesionesExpiradas_();
 
   return {
     ok: true,
@@ -200,7 +254,8 @@ function login_(datos) {
       turno: op.Turno,
       pc: pcFinal,
       tipo: op.Tipo,
-      esFranquero: esFranquero_(op)
+      esFranquero: esFranquero_(op),
+      modoCovertura: datos.modoCovertura === true
     },
     cierresForzosos: cierres
   };
