@@ -116,6 +116,58 @@
       margin: 4px 5px 4px 0;
     }
 
+    .telef-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin: 4px 6px 4px 0;
+      vertical-align: top;
+    }
+
+    .telef-item .badge {
+      margin: 0;
+      transition: background .2s, opacity .2s;
+    }
+
+    .telef-item.caido .badge {
+      background: #4a1a1a;
+      color: #f88;
+      text-decoration: line-through;
+      opacity: .75;
+    }
+
+    .telef-item .btn-icon {
+      background: none;
+      border: none;
+      padding: 2px 4px;
+      margin: 0;
+      width: auto;
+      font-size: 13px;
+      cursor: pointer;
+      opacity: .5;
+      border-radius: 6px;
+      transition: opacity .15s;
+    }
+
+    .telef-item .btn-icon:hover { opacity: 1; background: #333; }
+
+    .telef-nota {
+      display: block;
+      font-size: 11px;
+      color: #f0b429;
+      margin-top: 2px;
+      max-width: 180px;
+      word-break: break-word;
+    }
+
+    .telef-nota-input {
+      font-size: 12px;
+      padding: 4px 8px;
+      margin: 2px 0 0;
+      width: 160px;
+      border-radius: 6px;
+    }
+
     .msg {
       color: #ddd;
       font-size: 14px;
@@ -593,6 +645,16 @@
     card.classList.remove("hidden");
   }
 
+  function _telefsKey() { return "telefsEstado_" + (operador.pc || ""); }
+
+  function _telefsCargarEstado() {
+    try { return JSON.parse(localStorage.getItem(_telefsKey()) || "{}"); } catch { return {}; }
+  }
+
+  function _telefsPersistir(estado) {
+    localStorage.setItem(_telefsKey(), JSON.stringify(estado));
+  }
+
   async function cargarTelefonosPC() {
     if (!operador.pc) return;
     const r = await api({ action: "gettelefonospc", pc: operador.pc });
@@ -600,10 +662,70 @@
     const box  = document.getElementById("telefonosBox");
     if (!r.ok || !r.telefonos.length) { card.classList.add("hidden"); return; }
 
-    box.innerHTML = r.telefonos.map(t =>
-      `<span class="badge"><b>${t.linea}</b> · ${t.tipo} · ${t.numero || ""}</span>`
-    ).join("");
+    window._telefsData = r.telefonos;
+    renderTelefonos();
     card.classList.remove("hidden");
+  }
+
+  function renderTelefonos() {
+    const box = document.getElementById("telefonosBox");
+    const estado = _telefsCargarEstado();
+    const telefonos = window._telefsData || [];
+
+    box.innerHTML = telefonos.map(t => {
+      const st = estado[t.linea] || {};
+      const caido = st.caido || false;
+      const nota = st.nota || "";
+      return `
+        <div class="telef-item${caido ? " caido" : ""}" id="telef-${_telefId(t.linea)}">
+          <div>
+            <span class="badge"><b>${t.linea}</b> · ${t.tipo} · ${t.numero || ""}</span>
+            ${nota ? `<span class="telef-nota">📝 ${nota}</span>` : ""}
+          </div>
+          <button class="btn-icon" onclick="toggleTelefCaido('${t.linea}')" title="${caido ? "Restaurar" : "Marcar caído"}">
+            ${caido ? "✅" : "📵"}
+          </button>
+          <button class="btn-icon" onclick="editarNotaTelef('${t.linea}')" title="Agregar nota">💬</button>
+        </div>`;
+    }).join("");
+  }
+
+  function _telefId(linea) { return linea.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_]/g, ""); }
+
+  function toggleTelefCaido(linea) {
+    const estado = _telefsCargarEstado();
+    if (!estado[linea]) estado[linea] = {};
+    estado[linea].caido = !estado[linea].caido;
+    _telefsPersistir(estado);
+    renderTelefonos();
+  }
+
+  function editarNotaTelef(linea) {
+    const estado = _telefsCargarEstado();
+    const actual = (estado[linea] || {}).nota || "";
+    const id = "telef-" + _telefId(linea);
+    const item = document.getElementById(id);
+    if (!item) return;
+
+    const yaAbierto = item.querySelector(".telef-nota-input");
+    if (yaAbierto) { yaAbierto.focus(); return; }
+
+    const inp = document.createElement("input");
+    inp.className = "telef-nota-input";
+    inp.value = actual;
+    inp.placeholder = "Escribí una nota...";
+    inp.maxLength = 80;
+    item.appendChild(inp);
+    inp.focus();
+
+    function guardar() {
+      if (!estado[linea]) estado[linea] = {};
+      estado[linea].nota = inp.value.trim();
+      _telefsPersistir(estado);
+      renderTelefonos();
+    }
+    inp.addEventListener("keydown", e => { if (e.key === "Enter") guardar(); if (e.key === "Escape") renderTelefonos(); });
+    inp.addEventListener("blur", guardar);
   }
 
   function mostrarCambioPin() {
