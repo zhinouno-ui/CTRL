@@ -479,9 +479,20 @@ function iniciarPausa_(datos, hojaNombre, tipoPausa, opciones) {
     }
 
     if (bloqueoCruzado) {
-      let minutosAbierta = '?';
+      let minutosAbierta = 0;
       if (tsInicio instanceof Date) {
         minutosAbierta = Math.max(0, Math.floor((new Date() - tsInicio) / 60000));
+      }
+
+      // Si el operador que bloquea ya no tiene sesión activa, cerrar la pausa abandonada
+      const bloqueadorActivo = obtenerSesionActiva_(String(operadorRow || ''));
+      if (!bloqueadorActivo) {
+        sh.getRange(i + 1, 7).setValue(hora_(new Date()));
+        sh.getRange(i + 1, 8).setValue(minutosAbierta);
+        sh.getRange(i + 1, 9).setValue('Sí');
+        sh.getRange(i + 1, 10).setValue('Cerrada (turno finalizado)');
+        SpreadsheetApp.flush();
+        continue;
       }
 
       return {
