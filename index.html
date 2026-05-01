@@ -230,8 +230,9 @@
       opacity: 1;
     }
 
-    .fw-btn-bano  { background: #1a73e8; }
-    .fw-btn-fumar { background: #5f6368; }
+    .fw-btn-bano     { background: #1a73e8; }
+    .fw-btn-fumar    { background: #5f6368; }
+    .fw-btn-limpieza { background: #ad7c00; }
   </style>
 </head>
 
@@ -248,6 +249,11 @@
 
     <label>PIN</label>
     <input id="loginPin" type="password" placeholder="PIN" />
+
+    <div id="pcSelectorWrap" class="hidden">
+      <label>PC en la que te sentás (franquero)</label>
+      <select id="pcSelector"></select>
+    </div>
 
     <button class="primary" onclick="login()">Ingresar</button>
     <div id="loginMsg" class="msg"></div>
@@ -284,16 +290,20 @@
       <div id="cambiarPinMsg" class="msg"></div>
     </div>
 
+    <!-- AVISO LIMPIEZA -->
+    <div class="card hidden" id="limpiezaAvisoCard">
+      <h3>🧹 Cronograma de limpieza</h3>
+      <div id="limpiezaAvisoBox"></div>
+    </div>
+
     <!-- ACCIONES -->
     <div class="card">
       <h3>Acciones rápidas</h3>
 
       <div class="row">
-        <button class="warning" onclick="banoInicio()">Voy al baño</button>
-        <button class="success" onclick="banoFin()">Volví del baño</button>
-
-        <button class="warning" onclick="fumarInicio()">Voy a fumar</button>
-        <button class="success" onclick="fumarFin()">Volví de fumar</button>
+        <button id="banoBtn"     class="warning" onclick="banoToggle()">🚿 Voy al baño</button>
+        <button id="fumarBtn"    class="warning" onclick="fumarToggle()">🚬 Voy a fumar</button>
+        <button id="limpiezaBtn" class="warning" onclick="limpiezaToggle()">🧹 Iniciar limpieza</button>
       </div>
 
       <div id="accionMsg" class="msg"></div>
@@ -303,6 +313,12 @@
     <div class="card">
       <h3>Mi historial de hoy</h3>
       <div id="historialBox"><span class="small">Sin registros todavía.</span></div>
+    </div>
+
+    <!-- TELEFONOS DE LA PC -->
+    <div class="card hidden" id="telefonosCard">
+      <h3>📞 Teléfonos de tu PC</h3>
+      <div id="telefonosBox"></div>
     </div>
 
     <!-- NOVEDADES -->
@@ -410,13 +426,17 @@
 <!-- FLOATING WIDGET -->
 <div id="floatWidget" class="hidden">
   <div class="fw-actions hidden" id="fwActions">
-    <button class="fw-btn fw-btn-bano" id="fwBanoBtn" onclick="fwToggleBano()">
+    <button class="fw-btn fw-btn-bano" id="fwBanoBtn" onclick="banoToggle()">
       🚿
       <span class="fw-tooltip" id="fwBanoTip">Baño</span>
     </button>
-    <button class="fw-btn fw-btn-fumar" id="fwFumarBtn" onclick="fwToggleFumar()">
+    <button class="fw-btn fw-btn-fumar" id="fwFumarBtn" onclick="fumarToggle()">
       🚬
       <span class="fw-tooltip" id="fwFumarTip">Fumar</span>
+    </button>
+    <button class="fw-btn fw-btn-limpieza" id="fwLimpiezaBtn" onclick="limpiezaToggle()">
+      🧹
+      <span class="fw-tooltip" id="fwLimpiezaTip">Limpieza</span>
     </button>
   </div>
   <button class="fw-gear" id="fwGear" onclick="fwToggle()">⚙️</button>
@@ -455,6 +475,7 @@
   async function login() {
     const nombre = document.getElementById("loginNombre").value.trim();
     const pin = document.getElementById("loginPin").value.trim();
+    const pcAsignada = document.getElementById("pcSelector").value || "";
 
     if (!nombre || !pin) {
       setMsg("loginMsg", "Completá nombre y PIN.");
@@ -463,14 +484,16 @@
 
     setMsg("loginMsg", "Validando...");
 
-    const r = await api({
-      action: "login",
-      nombre,
-      pin
-    });
+    const r = await api({ action: "login", nombre, pin, pcAsignada });
 
     if (!r.ok) {
       setMsg("loginMsg", r.error || "No se pudo ingresar.");
+      return;
+    }
+
+    if (r.requierePcSelector) {
+      await mostrarSelectorPC();
+      setMsg("loginMsg", "Sos franquero, elegí en qué PC te sentás y volvé a presionar Ingresar.");
       return;
     }
 
@@ -479,10 +502,28 @@
 
     await api({ action: "ficharingreso", nombre: operador.nombre });
 
+    if (r.cierresForzosos && r.cierresForzosos.length) {
+      alert("Se cerraron sesiones expiradas: " + r.cierresForzosos.join(", "));
+    }
+
     mostrarApp();
   }
 
-  function mostrarApp() {
+  async function mostrarSelectorPC() {
+    const wrap = document.getElementById("pcSelectorWrap");
+    const sel = document.getElementById("pcSelector");
+    const r = await api({ action: "getpcs" });
+    sel.innerHTML = "";
+    (r.pcs || []).forEach(p => {
+      const opt = document.createElement("option");
+      opt.value = p.pc;
+      opt.textContent = p.pc;
+      sel.appendChild(opt);
+    });
+    wrap.classList.remove("hidden");
+  }
+
+  async function mostrarApp() {
     document.getElementById("loginCard").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
 
@@ -494,10 +535,54 @@
       <span class="badge">Tipo: ${operador.tipo}</span>
     `;
 
+    const ant = localStorage.getItem("operadorAnterior") || "";
+    if (ant) document.getElementById("entrega").value = ant;
+
     cargarNovedades();
     historialRenderizar(historialCargar());
     fwMostrar();
-    fwActualizarTooltips();
+
+    await sincronizarEstadoPausas();
+    cargarLimpiezaHoy();
+    cargarTelefonosPC();
+  }
+
+  async function sincronizarEstadoPausas() {
+    const r = await api({ action: "getmispausas", nombre: operador.nombre });
+    if (r.ok) {
+      pausaBano = !!r.bano;
+      pausaFumar = !!r.fumar;
+      pausaLimpieza = !!r.limpieza;
+    }
+    actualizarBotones();
+  }
+
+  async function cargarLimpiezaHoy() {
+    const r = await api({ action: "getlimpiezahoy" });
+    const card = document.getElementById("limpiezaAvisoCard");
+    const box  = document.getElementById("limpiezaAvisoBox");
+    if (!r.ok || !r.pc) { card.classList.add("hidden"); return; }
+
+    const meToca = String(r.pc).toLowerCase() === String(operador.pc || "").toLowerCase();
+    box.innerHTML = meToca
+      ? `<div class="alert">Hoy <b>${r.pc}</b> tiene la limpieza asignada — te toca a vos.</div>
+         <span class="small">Rotación: ${r.rotacion.join(" → ")}</span>`
+      : `<div class="alert ok">Hoy limpia <b>${r.pc}</b>.</div>
+         <span class="small">Rotación: ${r.rotacion.join(" → ")}</span>`;
+    card.classList.remove("hidden");
+  }
+
+  async function cargarTelefonosPC() {
+    if (!operador.pc) return;
+    const r = await api({ action: "gettelefonospc", pc: operador.pc });
+    const card = document.getElementById("telefonosCard");
+    const box  = document.getElementById("telefonosBox");
+    if (!r.ok || !r.telefonos.length) { card.classList.add("hidden"); return; }
+
+    box.innerHTML = r.telefonos.map(t =>
+      `<span class="badge"><b>${t.linea}</b> · ${t.tipo} · ${t.numero || ""}</span>`
+    ).join("");
+    card.classList.remove("hidden");
   }
 
   function mostrarCambioPin() {
@@ -553,6 +638,9 @@
   }
 
   async function cerrarSesion() {
+    if (operador && operador.nombre) {
+      localStorage.setItem("operadorAnterior", operador.nombre);
+    }
     await api({ action: "ficharsalida", nombre: operador.nombre });
     localStorage.removeItem("operadorActivo");
     localStorage.removeItem("historialPausas");
@@ -595,70 +683,89 @@
       return;
     }
 
+    const iconos = { "baño": "🚿", "fumar": "🚬", "limpieza": "🧹" };
+    const labels = { "baño": "Baño", "fumar": "Fumar", "limpieza": "Limpieza" };
+
     box.innerHTML = data.items.map(i => {
-      const icono = i.tipo === "baño" ? "🚿" : "🚬";
       const duracion = i.minutos != null
         ? `${i.minutos} min${i.excedio === "Sí" ? " ⚠️" : ""}`
         : "en curso...";
       const fin = i.fin ? ` → ${i.fin}` : "";
       return `<div class="novedad" style="padding:10px 14px;margin-bottom:8px;">
-        ${icono} <b>${i.tipo === "baño" ? "Baño" : "Fumar"}</b>
+        ${iconos[i.tipo] || ""} <b>${labels[i.tipo] || i.tipo}</b>
         &nbsp;·&nbsp; Inicio: ${i.inicio}${fin}
         &nbsp;·&nbsp; <span class="small">${duracion}</span>
       </div>`;
     }).join("");
   }
 
-  async function banoInicio() {
-    setMsg("accionMsg", "Registrando salida al baño...");
+  const PAUSAS_CONFIG = {
+    bano:     { tipo: "baño",     accionInicio: "banoinicio",     accionFin: "banofin",     labelInicio: "🚿 Voy al baño",      labelFin: "🚿 Volví del baño",  fwTipInicio: "Iniciar baño",     fwTipFin: "Finalizar baño",     mainBtn: "banoBtn",     fwBtn: "fwBanoBtn",     fwTip: "fwBanoTip" },
+    fumar:    { tipo: "fumar",    accionInicio: "fumarinicio",    accionFin: "fumarfin",    labelInicio: "🚬 Voy a fumar",      labelFin: "🚬 Volví de fumar",  fwTipInicio: "Iniciar fumar",    fwTipFin: "Finalizar fumar",    mainBtn: "fumarBtn",    fwBtn: "fwFumarBtn",    fwTip: "fwFumarTip" },
+    limpieza: { tipo: "limpieza", accionInicio: "limpiezainicio", accionFin: "limpiezafin", labelInicio: "🧹 Iniciar limpieza", labelFin: "🧹 Terminar limpieza", fwTipInicio: "Iniciar limpieza", fwTipFin: "Finalizar limpieza", mainBtn: "limpiezaBtn", fwBtn: "fwLimpiezaBtn", fwTip: "fwLimpiezaTip" }
+  };
 
-    const r = await api({ action: "banoinicio", nombre: operador.nombre });
+  async function pausaToggle(clave) {
+    const cfg = PAUSAS_CONFIG[clave];
+    const abierta = clave === "bano" ? pausaBano : clave === "fumar" ? pausaFumar : pausaLimpieza;
 
-    if (r.ok) {
-      historialAgregar({ tipo: "baño", inicio: r.inicio || horaActual_() });
-      setMsg("accionMsg", `Baño iniciado: ${r.inicio || ""}`);
-    } else {
-      setMsg("accionMsg", r.error);
+    setMsg("accionMsg", abierta ? `Cerrando ${cfg.tipo}...` : `Iniciando ${cfg.tipo}...`);
+
+    const r = await api({
+      action: abierta ? cfg.accionFin : cfg.accionInicio,
+      nombre: operador.nombre,
+      pcAsignada: operador.pc || ""
+    });
+
+    if (!r.ok) {
+      setMsg("accionMsg", r.error || "Error.");
+      return;
     }
+
+    if (abierta) {
+      historialActualizarUltimo({ tipo: cfg.tipo, fin: r.regreso || horaActual_(), minutos: r.minutos, excedio: r.excedio });
+      setMsg("accionMsg", `Cerrado ${cfg.tipo}. Minutos: ${r.minutos} · Excedió: ${r.excedio}`);
+    } else {
+      historialAgregar({ tipo: cfg.tipo, inicio: r.inicio || horaActual_() });
+      setMsg("accionMsg", `${cfg.tipo} iniciada: ${r.inicio || ""}`);
+    }
+
+    if (clave === "bano") pausaBano = !abierta;
+    else if (clave === "fumar") pausaFumar = !abierta;
+    else pausaLimpieza = !abierta;
+
+    actualizarBotones();
   }
 
-  async function banoFin() {
-    setMsg("accionMsg", "Registrando regreso del baño...");
+  function banoToggle()     { return pausaToggle("bano"); }
+  function fumarToggle()    { return pausaToggle("fumar"); }
+  function limpiezaToggle() { return pausaToggle("limpieza"); }
 
-    const r = await api({ action: "banofin", nombre: operador.nombre });
+  function actualizarBotones() {
+    const estados = { bano: pausaBano, fumar: pausaFumar, limpieza: pausaLimpieza };
+    Object.keys(PAUSAS_CONFIG).forEach(k => {
+      const cfg = PAUSAS_CONFIG[k];
+      const abierta = estados[k];
 
-    if (r.ok) {
-      historialActualizarUltimo({ tipo: "baño", fin: r.regreso || horaActual_(), minutos: r.minutos, excedio: r.excedio });
-      setMsg("accionMsg", `Regreso del baño.\nMinutos: ${r.minutos}\nExcedió: ${r.excedio}`);
-    } else {
-      setMsg("accionMsg", r.error);
-    }
-  }
+      const main = document.getElementById(cfg.mainBtn);
+      if (main) {
+        main.textContent = abierta ? cfg.labelFin : cfg.labelInicio;
+        main.classList.toggle("warning", !abierta);
+        main.classList.toggle("success", abierta);
+      }
 
-  async function fumarInicio() {
-    setMsg("accionMsg", "Registrando salida a fumar...");
+      const fwTip = document.getElementById(cfg.fwTip);
+      if (fwTip) fwTip.innerText = abierta ? cfg.fwTipFin : cfg.fwTipInicio;
 
-    const r = await api({ action: "fumarinicio", nombre: operador.nombre });
-
-    if (r.ok) {
-      historialAgregar({ tipo: "fumar", inicio: r.inicio || horaActual_() });
-      setMsg("accionMsg", `Fumar iniciado: ${r.inicio || ""}`);
-    } else {
-      setMsg("accionMsg", r.error);
-    }
-  }
-
-  async function fumarFin() {
-    setMsg("accionMsg", "Registrando regreso de fumar...");
-
-    const r = await api({ action: "fumarfin", nombre: operador.nombre });
-
-    if (r.ok) {
-      historialActualizarUltimo({ tipo: "fumar", fin: r.regreso || horaActual_(), minutos: r.minutos, excedio: r.excedio });
-      setMsg("accionMsg", `Regreso de fumar.\nMinutos: ${r.minutos}\nExcedió: ${r.excedio}`);
-    } else {
-      setMsg("accionMsg", r.error);
-    }
+      const fwBtn = document.getElementById(cfg.fwBtn);
+      if (fwBtn) {
+        if (abierta) {
+          fwBtn.style.background = "#16a765";
+        } else {
+          fwBtn.style.background = "";
+        }
+      }
+    });
   }
 
   function horaActual_() {
@@ -801,6 +908,7 @@
   let fwOpen = false;
   let pausaBano = false;
   let pausaFumar = false;
+  let pausaLimpieza = false;
 
   function fwMostrar() {
     fwWidget.classList.remove("hidden");
@@ -809,55 +917,6 @@
   function fwToggle() {
     fwOpen = !fwOpen;
     fwActions.classList.toggle("hidden", !fwOpen);
-  }
-
-  function fwActualizarTooltips() {
-    document.getElementById("fwBanoTip").innerText  = pausaBano  ? "Finalizar baño"  : "Iniciar baño";
-    document.getElementById("fwFumarTip").innerText = pausaFumar ? "Finalizar fumar" : "Iniciar fumar";
-    document.getElementById("fwBanoBtn").style.background  = pausaBano  ? "#16a765" : "#1a73e8";
-    document.getElementById("fwFumarBtn").style.background = pausaFumar ? "#16a765" : "#5f6368";
-  }
-
-  async function fwToggleBano() {
-    setMsg("accionMsg", pausaBano ? "Registrando regreso del baño..." : "Registrando salida al baño...");
-    const r = await api({ action: pausaBano ? "banofin" : "banoinicio", nombre: operador.nombre });
-
-    if (r.ok) {
-      if (!pausaBano) {
-        historialAgregar({ tipo: "baño", inicio: r.inicio || horaActual_() });
-      } else {
-        historialActualizarUltimo({ tipo: "baño", fin: r.regreso || horaActual_(), minutos: r.minutos, excedio: r.excedio });
-      }
-      pausaBano = !pausaBano;
-      fwActualizarTooltips();
-      setMsg("accionMsg", pausaBano
-        ? `Baño iniciado: ${r.inicio || ""}`
-        : `Regreso del baño. Minutos: ${r.minutos} · Excedió: ${r.excedio}`
-      );
-    } else {
-      setMsg("accionMsg", r.error || "Error.");
-    }
-  }
-
-  async function fwToggleFumar() {
-    setMsg("accionMsg", pausaFumar ? "Registrando regreso de fumar..." : "Registrando salida a fumar...");
-    const r = await api({ action: pausaFumar ? "fumarfin" : "fumarinicio", nombre: operador.nombre });
-
-    if (r.ok) {
-      if (!pausaFumar) {
-        historialAgregar({ tipo: "fumar", inicio: r.inicio || horaActual_() });
-      } else {
-        historialActualizarUltimo({ tipo: "fumar", fin: r.regreso || horaActual_(), minutos: r.minutos, excedio: r.excedio });
-      }
-      pausaFumar = !pausaFumar;
-      fwActualizarTooltips();
-      setMsg("accionMsg", pausaFumar
-        ? `Fumar iniciado: ${r.inicio || ""}`
-        : `Regreso de fumar. Minutos: ${r.minutos} · Excedió: ${r.excedio}`
-      );
-    } else {
-      setMsg("accionMsg", r.error || "Error.");
-    }
   }
 
   // Drag

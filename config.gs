@@ -1,13 +1,22 @@
 const HOJAS = {
   OPERADORES: 'CONFIG_OPERADORES',
-  TURNOS: 'CONFIG_TURNOS',
   TELEFONOS: 'CONFIG_TELEFONOS',
+  PCS: 'CONFIG_PC',
   FICHAJES: 'FICHAJES',
   RECEPCION: 'RECEPCION_TURNO',
   BANOS: 'BAÑO_PAUSAS',
   FUMAR: 'FUMAR_PAUSAS',
+  LIMPIEZA: 'LIMPIEZA_PAUSAS',
   NOVEDADES: 'ERRORES_NOVEDADES'
 };
+
+const TURNOS_CONFIG = {
+  TM: { recepcion: '05:55', tardeDesde: '06:00', salida: '13:55', tolerancia: 5 },
+  TT: { recepcion: '13:55', tardeDesde: '14:00', salida: '21:55', tolerancia: 5 },
+  TN: { recepcion: '21:55', tardeDesde: '22:00', salida: '05:55', tolerancia: 5 }
+};
+
+const HORAS_MAX_FICHAJE = 9;
 
 function doGet(e) {
   try {
@@ -42,6 +51,12 @@ function manejarAccion_(datos) {
   if (datos.action === 'getnovedadespendientes') return json_(getNovedadesPendientes_(datos));
   if (datos.action === 'actualizarnovedad') return json_(actualizarNovedad_(datos));
   if (datos.action === 'cambiarpin') return json_(cambiarPin_(datos));
+  if (datos.action === 'getpcs') return json_(getPCs_());
+  if (datos.action === 'getlimpiezahoy') return json_(getLimpiezaHoy_());
+  if (datos.action === 'gettelefonospc') return json_(getTelefonosPC_(datos));
+  if (datos.action === 'getmispausas') return json_(getMisPausasAbiertas_(datos));
+  if (datos.action === 'limpiezainicio') return json_(limpiezaInicio_(datos));
+  if (datos.action === 'limpiezafin') return json_(limpiezaFin_(datos));
 
   return json_({
     ok: true,
@@ -75,6 +90,8 @@ function normalizarDatos_(data) {
 
     pinActual: data.pinActual || '',
     pinNuevo: data.pinNuevo || '',
+
+    pcAsignada: data.pcAsignada || '',
 
     id: data.id || '',
     estado: data.estado || '',
@@ -122,7 +139,13 @@ function esSi_(valor) {
 
 function getConfig_() {
   const operadores = filas_(HOJAS.OPERADORES).filter(o => esSi_(o.Activo));
-  const turnos = filas_(HOJAS.TURNOS);
+  const turnos = Object.keys(TURNOS_CONFIG).map(t => ({
+    Turno: t,
+    'Hora recepción': TURNOS_CONFIG[t].recepcion,
+    'Tarde desde': TURNOS_CONFIG[t].tardeDesde,
+    'Hora salida': TURNOS_CONFIG[t].salida,
+    'Tolerancia min': TURNOS_CONFIG[t].tolerancia
+  }));
   const telefonos = filas_(HOJAS.TELEFONOS).filter(t => esSi_(t['Activo en sistema']));
 
   return { ok: true, operadores, turnos, telefonos };
@@ -138,9 +161,20 @@ function getOperador_(nombre) {
 }
 
 function getTurno_(turno) {
-  return filas_(HOJAS.TURNOS).find(t =>
-    String(t.Turno || '').trim().toLowerCase() === String(turno || '').trim().toLowerCase()
-  );
+  const t = String(turno || '').trim().toUpperCase();
+  const cfg = TURNOS_CONFIG[t];
+  if (!cfg) return null;
+  return {
+    Turno: t,
+    'Hora recepción': cfg.recepcion,
+    'Tarde desde': cfg.tardeDesde,
+    'Hora salida': cfg.salida,
+    'Tolerancia min': cfg.tolerancia
+  };
+}
+
+function esFranquero_(op) {
+  return String(op && op.Tipo || '').trim().toLowerCase().indexOf('franq') !== -1;
 }
 
 function login_(datos) {
@@ -149,15 +183,86 @@ function login_(datos) {
   if (!op) return { ok: false, error: 'Operador no activo o no encontrado.' };
   if (String(op.PIN) !== String(datos.pin)) return { ok: false, error: 'PIN incorrecto.' };
 
+  if (esFranquero_(op) && !datos.pcAsignada) {
+    return { ok: true, requierePcSelector: true };
+  }
+
+  const pcFinal = esFranquero_(op)
+    ? String(datos.pcAsignada).trim().toUpperCase()
+    : op.PC;
+
+  const cierres = cerrarSesionesExpiradas_();
+
   return {
     ok: true,
     operador: {
       nombre: op.Nombre,
       turno: op.Turno,
-      pc: op.PC,
-      tipo: op.Tipo
-    }
+      pc: pcFinal,
+      tipo: op.Tipo,
+      esFranquero: esFranquero_(op)
+    },
+    cierresForzosos: cierres
   };
+}
+
+function cerrarSesionesExpiradas_() {
+  const sh = hoja_(HOJAS.FICHAJES);
+  const values = sh.getDataRange().getValues();
+  if (values.length < 4) return [];
+
+  const ahora = new Date();
+  const limiteMs = HORAS_MAX_FICHAJE * 3600 * 1000;
+
+  const ultimosPorOperador = {};
+
+  for (let i = 3; i < values.length; i++) {
+    const ts = values[i][0];
+    const nombre = values[i][2];
+    const accion = values[i][6];
+
+    if (!nombre) continue;
+
+    const key = String(nombre).trim().toLowerCase();
+    if (!ultimosPorOperador[key] || ts > ultimosPorOperador[key].timestamp) {
+      ultimosPorOperador[key] = {
+        rowIdx: i,
+        accion: accion,
+        timestamp: ts,
+        nombre: nombre,
+        turno: values[i][3],
+        pc: values[i][4],
+        tipo: values[i][5]
+      };
+    }
+  }
+
+  const cerrados = [];
+
+  for (const key in ultimosPorOperador) {
+    const ult = ultimosPorOperador[key];
+    if (ult.accion === 'Ingreso' && ult.timestamp instanceof Date) {
+      if (ahora - ult.timestamp > limiteMs) {
+        sh.appendRow([
+          new Date(),
+          fecha_(ahora),
+          ult.nombre,
+          ult.turno || '',
+          ult.pc || '',
+          ult.tipo || '',
+          'Salida',
+          hora_(ahora),
+          'Salida forzosa',
+          '',
+          'Cerrado automáticamente: turno expirado'
+        ]);
+        cerrados.push(ult.nombre);
+      }
+    }
+  }
+
+  if (cerrados.length) SpreadsheetApp.flush();
+  return cerrados;
 }
 
 function ficharIngreso_(datos) {
@@ -213,7 +318,7 @@ function ficharSalida_(datos) {
 }
 
 function banoInicio_(datos) {
-  return iniciarPausa_(datos, HOJAS.BANOS, 'baño');
+  return iniciarPausa_(datos, HOJAS.BANOS, 'baño', { bloqueoCruzado: true });
 }
 
 function banoFin_(datos) {
@@ -221,29 +326,52 @@ function banoFin_(datos) {
 }
 
 function fumarInicio_(datos) {
-  return iniciarPausa_(datos, HOJAS.FUMAR, 'fumar');
+  return iniciarPausa_(datos, HOJAS.FUMAR, 'fumar', { bloqueoCruzado: true });
 }
 
 function fumarFin_(datos) {
   return finalizarPausa_(datos, HOJAS.FUMAR, 'fumar');
 }
 
-function iniciarPausa_(datos, hojaNombre, tipoPausa) {
+function limpiezaInicio_(datos) {
+  return iniciarPausa_(datos, HOJAS.LIMPIEZA, 'limpieza', { bloqueoCruzado: false });
+}
+
+function limpiezaFin_(datos) {
+  return finalizarPausa_(datos, HOJAS.LIMPIEZA, 'limpieza');
+}
+
+function iniciarPausa_(datos, hojaNombre, tipoPausa, opciones) {
+  opciones = opciones || {};
+  const bloqueoCruzado = opciones.bloqueoCruzado === true;
+
   const op = getOperador_(datos.nombre);
   if (!op) return { ok: false, error: 'Operador no encontrado.' };
+
+  const pcOperador = String(datos.pcAsignada || op.PC || '').trim();
 
   const sh = hoja_(hojaNombre);
   const values = sh.getDataRange().getValues();
 
   for (let i = values.length - 1; i >= 3; i--) {
-    const operador = values[i][2];
+    const operadorRow = values[i][2];
+    const pcRow = values[i][4];
     const estado = values[i][9];
 
-    if (
-      String(operador || '').trim().toLowerCase() === String(op.Nombre || '').trim().toLowerCase()
-      && estado === 'Abierta'
-    ) {
-      return { ok: false, error: 'Ya hay una pausa abierta para este operador.' };
+    if (estado !== 'Abierta') continue;
+
+    const mismoOp = String(operadorRow || '').trim().toLowerCase()
+      === String(op.Nombre || '').trim().toLowerCase();
+
+    if (mismoOp) {
+      return { ok: false, error: 'Ya tenés una pausa abierta de ' + tipoPausa + '.' };
+    }
+
+    if (bloqueoCruzado) {
+      return {
+        ok: false,
+        error: 'Ya hay alguien en ' + tipoPausa + ' (' + operadorRow + ' · ' + pcRow + '). Esperá a que termine.'
+      };
     }
   }
 
@@ -254,7 +382,7 @@ function iniciarPausa_(datos, hojaNombre, tipoPausa) {
     fecha_(ahora),
     op.Nombre,
     op.Turno,
-    op.PC,
+    pcOperador,
     hora_(ahora),
     '',
     '',
@@ -445,6 +573,81 @@ function actualizarNovedad_(datos) {
   }
 
   return { ok: false, error: 'No se encontró la novedad con ID: ' + idBuscado };
+}
+
+function getPCs_() {
+  const filas = filas_(HOJAS.PCS);
+  const pcs = filas
+    .filter(p => String(p.Estado || '').trim().toLowerCase() === 'activa')
+    .map(p => ({
+      pc: String(p.PC || '').trim(),
+      orden: Number(p['Orden rotación llmpieza'] || p['Orden rotación limpieza'] || p['Orden rotacion limpieza'] || 999)
+    }))
+    .filter(p => p.pc)
+    .sort((a, b) => a.orden - b.orden);
+  return { ok: true, pcs };
+}
+
+function getLimpiezaHoy_() {
+  const r = getPCs_();
+  if (!r.pcs.length) return { ok: true, pc: null };
+
+  const ahora = new Date();
+  const dia = Math.floor(
+    (Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate())) / (24 * 3600 * 1000)
+  );
+  const idx = ((dia % r.pcs.length) + r.pcs.length) % r.pcs.length;
+  const elegida = r.pcs[idx];
+
+  return {
+    ok: true,
+    pc: elegida.pc,
+    orden: elegida.orden,
+    fecha: fecha_(ahora),
+    rotacion: r.pcs.map(p => p.pc)
+  };
+}
+
+function getTelefonosPC_(datos) {
+  const pcFiltro = String(datos.pc || '').trim().toLowerCase();
+  if (!pcFiltro) return { ok: true, telefonos: [] };
+
+  const telefonos = filas_(HOJAS.TELEFONOS)
+    .filter(t => esSi_(t['Activo en sistema']))
+    .filter(t => String(t.PC || '').trim().toLowerCase() === pcFiltro)
+    .map(t => ({
+      linea: t.Linea,
+      tipo: t.Tipo,
+      numero: t.Notas
+    }));
+
+  return { ok: true, telefonos };
+}
+
+function getMisPausasAbiertas_(datos) {
+  const nombre = String(datos.nombre || '').trim().toLowerCase();
+  const result = { ok: true, bano: false, fumar: false, limpieza: false };
+
+  if (!nombre) return result;
+
+  result.bano     = tienePausaAbierta_(HOJAS.BANOS, nombre);
+  result.fumar    = tienePausaAbierta_(HOJAS.FUMAR, nombre);
+  result.limpieza = tienePausaAbierta_(HOJAS.LIMPIEZA, nombre);
+
+  return result;
+}
+
+function tienePausaAbierta_(hojaNombre, nombreLower) {
+  try {
+    const sh = hoja_(hojaNombre);
+    const values = sh.getDataRange().getValues();
+    for (let i = values.length - 1; i >= 3; i--) {
+      const op = String(values[i][2] || '').trim().toLowerCase();
+      const estado = values[i][9];
+      if (op === nombreLower && estado === 'Abierta') return true;
+    }
+  } catch (e) {}
+  return false;
 }
 
 function cambiarPin_(datos) {
