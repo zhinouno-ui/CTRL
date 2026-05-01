@@ -7,7 +7,8 @@ const HOJAS = {
   BANOS: 'BAÑO_PAUSAS',
   FUMAR: 'FUMAR_PAUSAS',
   LIMPIEZA: 'LIMPIEZA_PAUSAS',
-  NOVEDADES: 'ERRORES_NOVEDADES'
+  NOVEDADES: 'ERRORES_NOVEDADES',
+  TAREAS: 'TAREAS_PC'
 };
 
 const TURNOS_CONFIG = {
@@ -57,6 +58,13 @@ function manejarAccion_(datos) {
   if (datos.action === 'getmispausas') return json_(getMisPausasAbiertas_(datos));
   if (datos.action === 'limpiezainicio') return json_(limpiezaInicio_(datos));
   if (datos.action === 'limpiezafin') return json_(limpiezaFin_(datos));
+  if (datos.action === 'verificaractivo') return json_(verificarActivo_(datos));
+  if (datos.action === 'gettareaspc') return json_(getTareasPC_(datos));
+  if (datos.action === 'completartarea') return json_(completarTarea_(datos));
+  if (datos.action === 'telefonocaido') return json_(telefonoCaido_(datos));
+  if (datos.action === 'telefonolevantado') return json_(telefonoLevantado_(datos));
+  if (datos.action === 'getlogtelefono') return json_(getLogTelefono_(datos));
+  if (datos.action === 'notarnovedad') return json_(notarNovedad_(datos));
 
   return json_({
     ok: true,
@@ -93,6 +101,11 @@ function normalizarDatos_(data) {
 
     pcAsignada: data.pcAsignada || '',
     modoCovertura: data.modoCovertura === true || data.modoCovertura === 'true',
+
+    linea: data.linea || '',
+    motivo: data.motivo || '',
+    nota: data.nota || '',
+    tareaId: data.tareaId || data.fila || '',
 
     id: data.id || '',
     estado: data.estado || '',
@@ -919,4 +932,200 @@ function horaASegundos_(hhmmss) {
   const s = partes[2] || 0;
 
   return h * 3600 + m * 60 + s;
+}
+
+// --- VERIFICAR OPERADOR ACTIVO ---
+
+function verificarActivo_(datos) {
+  const nombre = String(datos.nombre || '').trim().toLowerCase();
+  if (!nombre) return { ok: true, activo: false };
+
+  const todos = filas_(HOJAS.OPERADORES);
+  const op = todos.find(o => String(o.Nombre || '').trim().toLowerCase() === nombre);
+  if (!op) return { ok: true, activo: false };
+  return { ok: true, activo: esSi_(op.Activo) };
+}
+
+// --- TAREAS DE SUPERVISOR ---
+
+function inicializarTareasPC_() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(HOJAS.TAREAS);
+  if (!sh) sh = ss.insertSheet(HOJAS.TAREAS);
+
+  const headerVal = String(sh.getRange(3, 1).getValue()).toLowerCase();
+  if (headerVal === 'timestamp') return sh;
+
+  if (sh.getLastRow() < 1) sh.getRange(1, 1).setValue('TAREAS_PC');
+  sh.getRange(3, 1, 1, 7).setValues([[
+    'Timestamp', 'Fecha', 'PC', 'Tarea', 'Estado', 'FechaCompletada', 'CompletoOperador'
+  ]]);
+  return sh;
+}
+
+function getTareasPC_(datos) {
+  const pcFiltro = String(datos.pc || '').trim().toLowerCase();
+  let sh;
+  try { sh = inicializarTareasPC_(); } catch (e) { return { ok: true, tareas: [], ultimaCompletada: null }; }
+
+  const values = sh.getDataRange().getValues();
+  if (values.length < 4) return { ok: true, tareas: [], ultimaCompletada: null };
+
+  const tareas = [];
+  let ultimaCompletada = null;
+
+  for (let i = 3; i < values.length; i++) {
+    const row = values[i];
+    const pc = String(row[2] || '').trim().toLowerCase();
+    if (!row[3] || pc !== pcFiltro) continue;
+
+    const estado = String(row[4] || '').trim().toLowerCase();
+    const t = {
+      fila: i + 1,
+      fecha: row[1],
+      pc: row[2],
+      tarea: row[3],
+      estado: row[4],
+      fechaCompletada: row[5],
+      completoPor: row[6],
+      timestamp: row[0]
+    };
+
+    if (estado === 'completada') {
+      if (!ultimaCompletada || t.timestamp > ultimaCompletada.timestamp) ultimaCompletada = t;
+    } else {
+      tareas.push(t);
+    }
+  }
+
+  return { ok: true, tareas, ultimaCompletada };
+}
+
+function completarTarea_(datos) {
+  const fila = parseInt(datos.tareaId || '0');
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+
+  let sh;
+  try { sh = inicializarTareasPC_(); } catch (e) { return { ok: false, error: e.message }; }
+
+  const ahora = new Date();
+  const tareaTexto = String(sh.getRange(fila, 4).getValue());
+  sh.getRange(fila, 5).setValue('Completada');
+  sh.getRange(fila, 6).setValue(fecha_(ahora) + ' ' + hora_(ahora));
+  sh.getRange(fila, 7).setValue(datos.nombre || '');
+  SpreadsheetApp.flush();
+
+  return { ok: true, tarea: tareaTexto, fecha: fecha_(ahora) + ' ' + hora_(ahora) };
+}
+
+// --- LOG TELÉFONOS (en CONFIG_TELEFONOS desde col H) ---
+// Cols H-Q (1-indexed 8-17): Timestamp | PC | Linea | HoraCaida | OperadorCaida | Motivo | HoraLevantado | DuracionMin | OperadorLevanta | Estado
+
+function inicializarLogTelefonos_() {
+  const sh = hoja_(HOJAS.TELEFONOS);
+  if (sh.getRange(3, 8).getValue()) return;
+  sh.getRange(3, 8, 1, 10).setValues([[
+    'Timestamp_log', 'PC_log', 'Linea', 'HoraCaida',
+    'OperadorCaida', 'Motivo', 'HoraLevantado',
+    'DuracionMin', 'OperadorLevanta', 'Estado_log'
+  ]]);
+}
+
+function telefonoCaido_(datos) {
+  inicializarLogTelefonos_();
+  const sh = hoja_(HOJAS.TELEFONOS);
+  const ahora = new Date();
+  const nextRow = sh.getLastRow() + 1;
+
+  sh.getRange(nextRow, 8, 1, 10).setValues([[
+    new Date(),
+    datos.pc || '',
+    datos.linea || '',
+    hora_(ahora),
+    datos.nombre || '',
+    datos.motivo || '',
+    '', '', '',
+    'Abierta'
+  ]]);
+  SpreadsheetApp.flush();
+  return { ok: true, hora: hora_(ahora) };
+}
+
+function telefonoLevantado_(datos) {
+  const sh = hoja_(HOJAS.TELEFONOS);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 4) return { ok: true };
+
+  const logRange = sh.getRange(4, 8, lastRow - 3, 10).getValues();
+  const lineaLower = String(datos.linea || '').trim().toLowerCase();
+  const ahora = new Date();
+
+  for (let i = logRange.length - 1; i >= 0; i--) {
+    const ts     = logRange[i][0];
+    const linea  = String(logRange[i][2] || '').trim().toLowerCase();
+    const estado = logRange[i][9];
+
+    if (linea !== lineaLower || estado !== 'Abierta') continue;
+
+    const duracion = ts instanceof Date ? Math.max(0, Math.ceil((ahora - ts) / 60000)) : 0;
+    const sheetRow = 4 + i;
+
+    sh.getRange(sheetRow, 14).setValue(hora_(ahora));
+    sh.getRange(sheetRow, 15).setValue(duracion);
+    sh.getRange(sheetRow, 16).setValue(datos.nombre || '');
+    sh.getRange(sheetRow, 17).setValue('Cerrada');
+    SpreadsheetApp.flush();
+
+    return { ok: true, duracion, hora: hora_(ahora) };
+  }
+  return { ok: true };
+}
+
+function getLogTelefono_(datos) {
+  const sh = hoja_(HOJAS.TELEFONOS);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 4) return { ok: true, log: [] };
+
+  const logRange = sh.getRange(4, 8, lastRow - 3, 10).getValues();
+  const lineaLower = String(datos.linea || '').trim().toLowerCase();
+  const log = [];
+
+  for (let i = logRange.length - 1; i >= 0; i--) {
+    if (!logRange[i][0]) continue;
+    const linea = String(logRange[i][2] || '').trim().toLowerCase();
+    if (lineaLower && linea !== lineaLower) continue;
+
+    log.push({
+      pc: logRange[i][1],
+      linea: logRange[i][2],
+      horaCaida: logRange[i][3],
+      operadorCaida: logRange[i][4],
+      motivo: logRange[i][5],
+      horaLevantado: logRange[i][6],
+      duracion: logRange[i][7],
+      operadorLevanta: logRange[i][8],
+      estado: logRange[i][9]
+    });
+    if (log.length >= 20) break;
+  }
+
+  return { ok: true, cantidad: log.length, log };
+}
+
+// --- NOTA EN NOVEDAD ---
+
+function notarNovedad_(datos) {
+  const idBuscado = String(datos.id || '').trim();
+  if (!idBuscado) return { ok: false, error: 'Falta ID.' };
+
+  const sh = hoja_(HOJAS.NOVEDADES);
+  const values = sh.getDataRange().getValues();
+
+  for (let i = 3; i < values.length; i++) {
+    if (String(values[i][10] || '').trim() !== idBuscado) continue;
+    sh.getRange(i + 1, 14).setValue(datos.nota || '');
+    SpreadsheetApp.flush();
+    return { ok: true };
+  }
+  return { ok: false, error: 'Novedad no encontrada.' };
 }

@@ -168,6 +168,35 @@
       border-radius: 6px;
     }
 
+    .telef-log-panel {
+      display: block;
+      background: #2a2a2a;
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin-top: 4px;
+      width: 300px;
+      font-size: 12px;
+    }
+
+    .telef-log-entry {
+      border-bottom: 1px solid #3a3a3a;
+      padding: 4px 0;
+      line-height: 1.5;
+    }
+
+    .telef-log-entry:last-child { border-bottom: none; }
+
+    .novedad-nota-input {
+      width: 100%;
+      font-size: 13px;
+      padding: 6px 10px;
+      margin: 6px 0 0;
+      border-radius: 8px;
+      background: #fff;
+      color: #111;
+      border: none;
+    }
+
     .msg {
       color: #ddd;
       font-size: 14px;
@@ -373,9 +402,16 @@
       <div id="telefonosBox"></div>
     </div>
 
+    <!-- TAREAS DE SUPERVISOR -->
+    <div class="card hidden" id="tareasCard">
+      <h3>⚡ Tareas asignadas</h3>
+      <div id="tareasBox"></div>
+      <div id="ultimaTareaBox"></div>
+    </div>
+
     <!-- NOVEDADES -->
     <div class="card" id="novedadesCard">
-      <h3>⚠️ Novedades pendientes</h3>
+      <h3>⚠️ Novedades pendientes <span id="novedadesBadge" class="badge" style="display:none;background:#d93025;color:#fff;font-size:12px"></span></h3>
       <div id="novedadesBox">Cargando novedades...</div>
     </div>
 
@@ -405,7 +441,7 @@
 
         <div>
           <label>Caja correcta</label>
-          <select id="cajaOk">
+          <select id="cajaOk" onchange="toggleDiferenciaCaja()">
             <option>Sí</option>
             <option>No</option>
           </select>
@@ -429,11 +465,10 @@
         </div>
       </div>
 
-      <label>Diferencia de caja / detalle</label>
-      <textarea id="diferenciaCaja" placeholder="Detalle si hay diferencia"></textarea>
-
-      <label>Teléfonos caídos</label>
-      <textarea id="telefonosCaidos" placeholder="Ej: WP1 caído, soporte en revisión"></textarea>
+      <div id="diferenciaCajaWrap" style="display:none">
+        <label>Diferencia de caja / detalle</label>
+        <textarea id="diferenciaCaja" placeholder="Detalle de la diferencia"></textarea>
+      </div>
 
       <label>Observaciones</label>
       <textarea id="obsRecepcion" placeholder="Observaciones del turno recibido"></textarea>
@@ -448,7 +483,6 @@
 
       <label>Tipo</label>
       <select id="tipoNovedad">
-        <option>Telefono caido</option>
         <option>Diferencia caja</option>
         <option>Reclamo</option>
         <option>Limpieza</option>
@@ -618,6 +652,9 @@
     await sincronizarEstadoPausas();
     cargarLimpiezaHoy();
     cargarTelefonosPC();
+    cargarNovedades();
+    cargarTareas();
+    toggleDiferenciaCaja();
   }
 
   async function sincronizarEstadoPausas() {
@@ -686,18 +723,54 @@
             ${caido ? "✅" : "📵"}
           </button>
           <button class="btn-icon" onclick="editarNotaTelef('${t.linea}')" title="Agregar nota">💬</button>
+          <button class="btn-icon" onclick="mostrarLogTelef('${t.linea}')" title="Historial de caídas">ℹ️</button>
         </div>`;
     }).join("");
   }
 
   function _telefId(linea) { return linea.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_]/g, ""); }
 
-  function toggleTelefCaido(linea) {
+  async function toggleTelefCaido(linea) {
     const estado = _telefsCargarEstado();
     if (!estado[linea]) estado[linea] = {};
-    estado[linea].caido = !estado[linea].caido;
+    const ahora = !estado[linea].caido;
+    estado[linea].caido = ahora;
     _telefsPersistir(estado);
     renderTelefonos();
+
+    if (ahora) {
+      const motivo = prompt("Motivo de la caída (opcional):") || "";
+      await api({ action: "telefonocaido", nombre: operador.nombre, pc: operador.pc, linea, motivo });
+    } else {
+      await api({ action: "telefonolevantado", nombre: operador.nombre, pc: operador.pc, linea });
+    }
+  }
+
+  async function mostrarLogTelef(linea) {
+    const id = "telef-" + _telefId(linea);
+    const item = document.getElementById(id);
+    if (!item) return;
+
+    const existente = item.querySelector(".telef-log-panel");
+    if (existente) { existente.remove(); return; }
+
+    const r = await api({ action: "getlogtelefono", linea, pc: operador.pc });
+    const panel = document.createElement("div");
+    panel.className = "telef-log-panel";
+
+    if (!r.ok || !r.log || !r.log.length) {
+      panel.innerHTML = '<span class="small">Sin caídas registradas.</span>';
+    } else {
+      panel.innerHTML = r.log.map(e => `
+        <div class="telef-log-entry">
+          <span class="small"><b>Caída:</b> ${e.horaCaida} — ${e.operadorCaida || ""}${e.motivo ? " · " + e.motivo : ""}</span><br>
+          <span class="small">${e.estado === "Cerrada"
+            ? `Levantado: ${e.horaLevantado} (${e.duracion} min) — ${e.operadorLevanta || ""}`
+            : "<b style='color:#f88'>Abierta</b>"
+          }</span>
+        </div>`).join("");
+    }
+    item.appendChild(panel);
   }
 
   function editarNotaTelef(linea) {
@@ -920,7 +993,17 @@
     return new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
 
+  function toggleDiferenciaCaja() {
+    const ok = document.getElementById("cajaOk").value === "Sí";
+    document.getElementById("diferenciaCajaWrap").style.display = ok ? "none" : "block";
+  }
+
   async function guardarRecepcion() {
+    const entrega = document.getElementById("entrega").value.trim();
+    if (!entrega) {
+      setMsg("recepcionMsg", "Completá el nombre del operador que entrega.");
+      return;
+    }
     setMsg("recepcionMsg", "Guardando recepción...");
 
     const r = await api({
@@ -933,7 +1016,6 @@
       cajaOk: document.getElementById("cajaOk").value,
       diferenciaCaja: document.getElementById("diferenciaCaja").value,
       revinculacionOk: document.getElementById("revinculacionOk").value,
-      telefonosCaidos: document.getElementById("telefonosCaidos").value,
       limpiezaCumplida: document.getElementById("limpiezaCumplida").value,
       observaciones: document.getElementById("obsRecepcion").value
     });
@@ -992,11 +1074,16 @@
       return;
     }
 
+    const badge = document.getElementById("novedadesBadge");
+    badge.textContent = r.novedades.length;
+    badge.style.display = "inline-block";
+
     box.innerHTML = "";
 
     r.novedades.forEach(n => {
       const div = document.createElement("div");
       div.className = "novedad";
+      const notaActual = n.resolucion || "";
 
       div.innerHTML = `
         <b>${n.tipo || "Novedad"}</b> · ${n.prioridad || ""} · ${n.estado || ""}<br>
@@ -1004,22 +1091,21 @@
           Fecha: ${n.fecha || ""} | Turno: ${n.turno || ""} | PC: ${n.pc || ""} | Operador: ${n.operador || ""}
         </span>
         <p>${n.detalle || ""}</p>
-        <p class="small">${n.observaciones || ""}</p>
+        ${notaActual ? `<p class="small" style="color:#f0b429">📝 ${notaActual}</p>` : ""}
 
         <div class="row">
-          <button class="warning" onclick="actualizarNovedad('${n.id}', 'En seguimiento')">
-            En seguimiento
-          </button>
-          <button class="success" onclick="actualizarNovedad('${n.id}', 'Resuelta')">
-            Resuelta
-          </button>
+          <button class="warning" onclick="actualizarNovedad('${n.id}', 'En seguimiento')">En seguimiento</button>
+          <button class="success" onclick="actualizarNovedad('${n.id}', 'Resuelta')">Resuelta</button>
+          <button class="secondary" onclick="toggleNotaNovedad('${n.id}', this)" style="width:auto;padding:6px 12px">📝 Nota</button>
+        </div>
+        <div id="nota-${n.id}" style="display:none;margin-top:6px">
+          <textarea class="novedad-nota-input" placeholder="Agregar nota..." rows="2">${notaActual}</textarea>
+          <button class="primary" onclick="guardarNotaNovedad('${n.id}', this)" style="margin-top:4px">Guardar nota</button>
         </div>
       `;
 
       box.appendChild(div);
     });
-
-    alert("⚠️ Hay novedades pendientes para esta PC.");
   }
 
   async function actualizarNovedad(id, estado) {
@@ -1046,9 +1132,84 @@
     }
   }
 
-  setInterval(() => {
-    if (operador) cargarNovedades();
-  }, 60000);
+  function toggleNotaNovedad(id, btn) {
+    const wrap = document.getElementById("nota-" + id);
+    if (!wrap) return;
+    const visible = wrap.style.display !== "none";
+    wrap.style.display = visible ? "none" : "block";
+    if (!visible) wrap.querySelector("textarea").focus();
+  }
+
+  async function guardarNotaNovedad(id, btn) {
+    const wrap = document.getElementById("nota-" + id);
+    const nota = wrap ? wrap.querySelector("textarea").value.trim() : "";
+    const r = await api({ action: "notarnovedad", id, nota });
+    if (r.ok) {
+      wrap.style.display = "none";
+      cargarNovedades();
+    } else {
+      alert(r.error || "No se pudo guardar la nota.");
+    }
+  }
+
+  async function cargarTareas() {
+    if (!operador || !operador.pc) return;
+    const r = await api({ action: "gettareaspc", pc: operador.pc });
+    const card = document.getElementById("tareasCard");
+    const box = document.getElementById("tareasBox");
+    const ultimaBox = document.getElementById("ultimaTareaBox");
+
+    if (!r.ok) { card.classList.add("hidden"); return; }
+
+    if (r.ultimaCompletada) {
+      ultimaBox.innerHTML = `<div class="alert ok" style="margin-top:8px">Última tarea completada: <b>${r.ultimaCompletada.tarea}</b> — ${r.ultimaCompletada.fechaCompletada || ""} por ${r.ultimaCompletada.completoPor || ""}</div>`;
+    } else {
+      ultimaBox.innerHTML = "";
+    }
+
+    if (!r.tareas.length) {
+      box.innerHTML = "";
+      card.classList[r.ultimaCompletada ? "remove" : "add"]("hidden");
+      return;
+    }
+
+    box.innerHTML = r.tareas.map(t => `
+      <div class="novedad">
+        <b>${t.tarea}</b><br>
+        <span class="small">Asignada: ${t.fecha || ""}</span>
+        <div class="row" style="margin-top:8px">
+          <button class="success" onclick="completarTarea(${t.fila}, '${(t.tarea || "").replace(/'/g, "\\'")}')">Completar</button>
+        </div>
+      </div>
+    `).join("");
+
+    card.classList.remove("hidden");
+  }
+
+  async function completarTarea(fila, texto) {
+    const r = await api({ action: "completartarea", tareaId: fila, nombre: operador.nombre });
+    if (r.ok) {
+      historialAgregar("Tarea completada: " + texto);
+      cargarTareas();
+    }
+  }
+
+  setInterval(async () => {
+    if (!operador) return;
+
+    const activo = await api({ action: "verificaractivo", nombre: operador.nombre });
+    if (activo.ok && activo.activo === false) {
+      alert("Se inhabilitó tu acceso. Comunicarte con tu superior.");
+      localStorage.removeItem("operadorActivo");
+      localStorage.removeItem("historialPausas");
+      operador = null;
+      location.reload();
+      return;
+    }
+
+    cargarNovedades();
+    cargarTareas();
+  }, 30000);
 
   // FLOATING WIDGET
   const fwWidget = document.getElementById("floatWidget");
