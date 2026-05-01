@@ -451,6 +451,58 @@ function limpiezaFin_(datos) {
   return finalizarPausa_(datos, HOJAS.LIMPIEZA, 'limpieza');
 }
 
+// Revisa BAÑO y FUMAR (todas las hojas con bloqueo cruzado) buscando pausas
+// abiertas de otros operadores. Auto-cierra pausas de operadores sin sesión activa.
+// Devuelve el primer bloqueo real encontrado, o null si está libre.
+function buscarPausaBloqueo_(nombreOperadorPropio) {
+  const hojasBloqueo = [
+    { nombre: HOJAS.BANOS, label: 'baño' },
+    { nombre: HOJAS.FUMAR, label: 'fumar' }
+  ];
+
+  const propioLower = String(nombreOperadorPropio || '').trim().toLowerCase();
+
+  for (var h = 0; h < hojasBloqueo.length; h++) {
+    var entry = hojasBloqueo[h];
+    var sh;
+    try { sh = hoja_(entry.nombre); } catch (e) { continue; }
+
+    var values = sh.getDataRange().getValues();
+    var huboFlush = false;
+
+    for (var i = values.length - 1; i >= 3; i--) {
+      var operadorRow = values[i][2];
+      var pcRow       = values[i][4];
+      var tsInicio    = values[i][0];
+      var estado      = values[i][9];
+
+      if (estado !== 'Abierta') continue;
+      if (String(operadorRow || '').trim().toLowerCase() === propioLower) continue;
+
+      var mins = tsInicio instanceof Date
+        ? Math.max(0, Math.floor((new Date() - tsInicio) / 60000))
+        : 0;
+
+      // Si el bloqueador ya no tiene sesión activa → cierre automático
+      if (!obtenerSesionActiva_(String(operadorRow || ''))) {
+        sh.getRange(i + 1, 7).setValue(hora_(new Date()));
+        sh.getRange(i + 1, 8).setValue(mins);
+        sh.getRange(i + 1, 9).setValue('Sí');
+        sh.getRange(i + 1, 10).setValue('Cerrada (turno finalizado)');
+        huboFlush = true;
+        continue;
+      }
+
+      if (huboFlush) SpreadsheetApp.flush();
+      return { operador: operadorRow, pc: pcRow, minutos: mins, tipo: entry.label };
+    }
+
+    if (huboFlush) SpreadsheetApp.flush();
+  }
+
+  return null;
+}
+
 function iniciarPausa_(datos, hojaNombre, tipoPausa, opciones) {
   opciones = opciones || {};
   const bloqueoCruzado = opciones.bloqueoCruzado === true;
@@ -460,49 +512,28 @@ function iniciarPausa_(datos, hojaNombre, tipoPausa, opciones) {
 
   const pcOperador = String(datos.pcAsignada || op.PC || '').trim();
 
+  // Verificar si el mismo operador ya tiene esta pausa abierta
   const sh = hoja_(hojaNombre);
   const values = sh.getDataRange().getValues();
-
-  for (let i = values.length - 1; i >= 3; i--) {
-    const operadorRow = values[i][2];
-    const pcRow = values[i][4];
-    const tsInicio = values[i][0];
-    const estado = values[i][9];
-
-    if (estado !== 'Abierta') continue;
-
-    const mismoOp = String(operadorRow || '').trim().toLowerCase()
-      === String(op.Nombre || '').trim().toLowerCase();
-
-    if (mismoOp) {
+  for (var i = values.length - 1; i >= 3; i--) {
+    if (values[i][9] !== 'Abierta') continue;
+    if (String(values[i][2] || '').trim().toLowerCase() === String(op.Nombre || '').trim().toLowerCase()) {
       return { ok: false, error: 'Ya tenés una pausa abierta de ' + tipoPausa + '.' };
     }
+  }
 
-    if (bloqueoCruzado) {
-      let minutosAbierta = 0;
-      if (tsInicio instanceof Date) {
-        minutosAbierta = Math.max(0, Math.floor((new Date() - tsInicio) / 60000));
-      }
-
-      // Si el operador que bloquea ya no tiene sesión activa, cerrar la pausa abandonada
-      const bloqueadorActivo = obtenerSesionActiva_(String(operadorRow || ''));
-      if (!bloqueadorActivo) {
-        sh.getRange(i + 1, 7).setValue(hora_(new Date()));
-        sh.getRange(i + 1, 8).setValue(minutosAbierta);
-        sh.getRange(i + 1, 9).setValue('Sí');
-        sh.getRange(i + 1, 10).setValue('Cerrada (turno finalizado)');
-        SpreadsheetApp.flush();
-        continue;
-      }
-
+  // Bloqueo cruzado: revisar todas las hojas bloqueantes
+  if (bloqueoCruzado) {
+    const bloqueo = buscarPausaBloqueo_(op.Nombre);
+    if (bloqueo) {
       return {
         ok: false,
         bloqueoCruzado: true,
-        bloqueador: { operador: operadorRow, pc: pcRow, minutos: minutosAbierta, tipo: tipoPausa },
+        bloqueador: { operador: bloqueo.operador, pc: bloqueo.pc, minutos: bloqueo.minutos, tipo: bloqueo.tipo },
         error:
-          'PC ' + pcRow + ' tiene una pausa de ' + tipoPausa + ' abierta hace ' + minutosAbierta + ' min ('
-          + operadorRow + '). Esperá a que regrese y la cierre antes de salir. '
-          + 'Si ya terminó, avisale a ' + operadorRow + ' que cierre la pausa desde su PC.'
+          'PC ' + bloqueo.pc + ' tiene una pausa de ' + bloqueo.tipo + ' abierta hace ' + bloqueo.minutos + ' min ('
+          + bloqueo.operador + '). Esperá a que regrese y la cierre antes de salir. '
+          + 'Si ya terminó, avisale a ' + bloqueo.operador + ' que cierre la pausa desde su PC.'
       };
     }
   }
