@@ -225,6 +225,11 @@
       margin-bottom: 12px;
     }
 
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
     .small {
       color: #bbb;
       font-size: 13px;
@@ -409,10 +414,29 @@
       <div id="ultimaTareaBox"></div>
     </div>
 
+    <!-- NOTAS DEL TURNO (POR PC) -->
+    <div class="card" id="notasTurnoCard">
+      <h3>📝 Notas del turno</h3>
+      <div id="notasAnterioresBox" style="margin-bottom:14px"></div>
+      <label>Tu nota para el siguiente turno</label>
+      <textarea id="miNotaTurno" placeholder="Algo que el siguiente operador debería saber sobre esta PC..."></textarea>
+      <button class="primary" onclick="guardarMiNotaTurno()">Guardar nota</button>
+      <div id="notaTurnoMsg" class="msg"></div>
+    </div>
+
     <!-- NOVEDADES -->
     <div class="card" id="novedadesCard">
       <h3>⚠️ Novedades pendientes <span id="novedadesBadge" class="badge" style="display:none;background:#d93025;color:#fff;font-size:12px"></span></h3>
       <div id="novedadesBox">Cargando novedades...</div>
+    </div>
+
+    <!-- MIS NOVEDADES REPORTADAS -->
+    <div class="card" id="misNovedadesCard" style="display:none">
+      <h3 style="cursor:pointer;user-select:none" onclick="toggleMisNovedades()">
+        📋 Mis novedades reportadas <span id="misNovedadesBadge" class="badge" style="background:#1a73e8;color:#fff;font-size:12px"></span>
+        <span id="misNovedadesArrow" style="float:right">▸</span>
+      </h3>
+      <div id="misNovedadesBox" style="display:none"></div>
     </div>
 
     <!-- RECEPCION -->
@@ -486,6 +510,7 @@
         <option>Diferencia caja</option>
         <option>Reclamo</option>
         <option>Limpieza</option>
+        <option>Premio pendiente</option>
         <option>Otro</option>
       </select>
 
@@ -551,6 +576,87 @@
       console.error("Respuesta no JSON:", text);
       return { ok: false, error: "La API no devolvió JSON válido." };
     }
+  }
+
+  // POST para payloads grandes (imágenes base64). Usa text/plain para evitar preflight CORS.
+  async function apiPost(params) {
+    try {
+      const res = await fetch(API_URL + "?_t=" + Date.now(), {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(params),
+        cache: "no-store"
+      });
+      const text = await res.text();
+      return JSON.parse(text);
+    } catch (e) {
+      return { ok: false, error: e.message || "Error de red." };
+    }
+  }
+
+  // Comprimir imagen client-side antes de subir (max 1600px, JPEG q=0.7)
+  function _comprimirImagen(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX = 1600;
+          let w = img.width, h = img.height;
+          if (w > MAX || h > MAX) {
+            const ratio = Math.min(MAX / w, MAX / h);
+            w = Math.round(w * ratio);
+            h = Math.round(h * ratio);
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", 0.72));
+        };
+        img.onerror = () => reject(new Error("No se pudo cargar la imagen"));
+        img.src = e.target.result;
+      };
+      reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function _attachPasteHandler(textareaId, previewId) {
+    const ta = document.getElementById(textareaId);
+    if (!ta || ta._pasteAttached) return;
+    ta._pasteAttached = true;
+    ta.addEventListener("paste", async (e) => {
+      const items = (e.clipboardData && e.clipboardData.items) || [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type && items[i].type.indexOf("image/") === 0) {
+          e.preventDefault();
+          const file = items[i].getAsFile();
+          if (!file) return;
+          const preview = document.getElementById(previewId);
+          if (preview) preview.innerHTML = '<span class="small">Comprimiendo imagen...</span>';
+          try {
+            const dataUrl = await _comprimirImagen(file);
+            ta._imagenPendiente = dataUrl;
+            if (preview) preview.innerHTML = `
+              <div style="margin-top:6px">
+                <img src="${dataUrl}" style="max-width:220px;max-height:160px;border-radius:6px;border:1px solid #444;display:block">
+                <button class="warning" style="margin-top:4px;width:auto;padding:4px 10px;font-size:12px" onclick="_cancelarImagen('${textareaId}', '${previewId}')">Quitar imagen</button>
+              </div>
+            `;
+          } catch (err) {
+            if (preview) preview.innerHTML = '<span style="color:#d93025" class="small">Error: ' + err.message + '</span>';
+          }
+          break;
+        }
+      }
+    });
+  }
+
+  function _cancelarImagen(textareaId, previewId) {
+    const ta = document.getElementById(textareaId);
+    if (ta) ta._imagenPendiente = null;
+    const preview = document.getElementById(previewId);
+    if (preview) preview.innerHTML = "";
   }
 
   function setMsg(id, msg) {
@@ -654,6 +760,8 @@
     cargarTelefonosPC();
     cargarNovedades();
     cargarTareas();
+    cargarMisNovedades();
+    cargarNotasTurnoAnteriores();
     toggleDiferenciaCaja();
   }
 
@@ -1098,33 +1206,43 @@
       document.getElementById("detalleNovedad").value = "";
       document.getElementById("obsNovedad").value = "";
       cargarNovedades();
+      cargarMisNovedades();
     } else {
       setMsg("novedadMsg", r.error || "No se pudo registrar novedad.");
     }
   }
 
-  async function cargarNovedades() {
+  async function cargarNovedades(prefetched) {
     const box = document.getElementById("novedadesBox");
-    box.innerHTML = "Cargando novedades...";
 
-    const r = await api({
-      action: "getnovedadespendientes",
-      pc: operador.pc
-    });
+    let r;
+    if (prefetched && Array.isArray(prefetched)) {
+      r = { ok: true, novedades: prefetched };
+    } else {
+      box.innerHTML = "Cargando novedades...";
+      r = await api({
+        action: "getnovedadespendientes",
+        pc: operador.pc
+      });
+    }
 
     if (!r.ok) {
       box.innerHTML = `<div class="alert">Error cargando novedades: ${r.error || ""}</div>`;
       return;
     }
 
+    const badge = document.getElementById("novedadesBadge");
+
     if (!r.novedades || r.novedades.length === 0) {
       box.innerHTML = `<div class="alert ok">Sin novedades pendientes para esta PC.</div>`;
+      badge.style.display = "none";
+      _novedadesPendientesCount = 0;
       return;
     }
 
-    const badge = document.getElementById("novedadesBadge");
     badge.textContent = r.novedades.length;
     badge.style.display = "inline-block";
+    _novedadesPendientesCount = r.novedades.length;
 
     box.innerHTML = "";
 
@@ -1150,6 +1268,7 @@
           <textarea class="novedad-nota-input" placeholder="Agregar nota..." rows="2">${notaActual}</textarea>
           <button class="primary" onclick="guardarNotaNovedad('${n.id}', this)" style="margin-top:4px">Guardar nota</button>
         </div>
+        ${_bloqueComentariosHtml(n.id)}
       `;
 
       box.appendChild(div);
@@ -1200,9 +1319,14 @@
     }
   }
 
-  async function cargarTareas() {
+  async function cargarTareas(prefetched) {
     if (!operador || !operador.pc) return;
-    const r = await api({ action: "gettareaspc", pc: operador.pc });
+    let r;
+    if (prefetched && typeof prefetched === "object") {
+      r = { ok: true, tareas: prefetched.tareas || [], ultimaCompletada: prefetched.ultimaCompletada || null };
+    } else {
+      r = await api({ action: "gettareaspc", pc: operador.pc });
+    }
     const card = document.getElementById("tareasCard");
     const box = document.getElementById("tareasBox");
     const ultimaBox = document.getElementById("ultimaTareaBox");
@@ -1214,6 +1338,8 @@
     } else {
       ultimaBox.innerHTML = "";
     }
+
+    _tareasPendientesCount = (r.tareas || []).length;
 
     if (!r.tareas.length) {
       box.innerHTML = "";
@@ -1234,6 +1360,203 @@
     card.classList.remove("hidden");
   }
 
+  async function cargarMisNovedades(prefetched) {
+    if (!operador) return;
+    let arr;
+    if (prefetched && Array.isArray(prefetched)) {
+      arr = prefetched;
+    } else {
+      const r = await api({ action: "getmisnovedades", nombre: operador.nombre });
+      if (!r.ok) return;
+      arr = r.novedades || [];
+    }
+
+    const card = document.getElementById("misNovedadesCard");
+    const box  = document.getElementById("misNovedadesBox");
+    const badge = document.getElementById("misNovedadesBadge");
+
+    if (!arr.length) {
+      card.style.display = "none";
+      return;
+    }
+    card.style.display = "block";
+    badge.textContent = arr.length;
+
+    box.innerHTML = arr.map(n => {
+      const estado = String(n.estado || "Pendiente");
+      const esResuelta = estado.toLowerCase() === "resuelta";
+      const color = esResuelta ? "#3eb368" : (estado.toLowerCase() === "en seguimiento" ? "#f0b429" : "#d93025");
+      return `
+        <div class="novedad" style="border-left:3px solid ${color}">
+          <b>${n.tipo || "Novedad"}</b> · <span style="color:${color}">${estado}</span> · ${n.prioridad || ""}<br>
+          <span class="small">${n.fecha || ""} · ${n.id || ""}</span>
+          <p style="margin:6px 0">${n.detalle || ""}</p>
+          ${n.resolucion ? `<p class="small" style="background:#222;padding:6px 10px;border-radius:4px;margin:4px 0">📝 <b>${n.revisadoPor || "Admin"}:</b> ${n.resolucion}</p>` : ""}
+          ${_bloqueComentariosHtml(n.id)}
+        </div>
+      `;
+    }).join("");
+  }
+
+  function toggleMisNovedades() {
+    const box = document.getElementById("misNovedadesBox");
+    const arrow = document.getElementById("misNovedadesArrow");
+    const visible = box.style.display !== "none";
+    box.style.display = visible ? "none" : "block";
+    arrow.textContent = visible ? "▸" : "▾";
+  }
+
+  // === NOTAS DEL TURNO (POR PC) ===
+  async function cargarNotasTurnoAnteriores() {
+    if (!operador) return;
+    const box = document.getElementById("notasAnterioresBox");
+    const r = await api({ action: "getnotaturnoanterior", pc: operador.pc });
+    if (!r.ok || !r.notas || !r.notas.length) {
+      box.innerHTML = `<div class="alert ok">Sin notas previas para esta PC.</div>`;
+      return;
+    }
+    box.innerHTML = `<b style="font-size:13px;color:#bbb">Notas previas — PC ${operador.pc}:</b>` + r.notas.map(n => `
+      <div class="novedad" style="border-left:3px solid #1a73e8;background:#1f2937;margin-top:6px">
+        <span class="small">${n.fecha || ""} · ${n.turno || ""} · ${n.operador || ""}</span>
+        <p style="margin:6px 0 0">${(n.nota || "").replace(/</g, "&lt;")}</p>
+      </div>
+    `).join("");
+  }
+
+  async function guardarMiNotaTurno() {
+    const nota = document.getElementById("miNotaTurno").value.trim();
+    if (!nota) { setMsg("notaTurnoMsg", "Escribí la nota primero."); return; }
+    setMsg("notaTurnoMsg", "Guardando...");
+    const r = await api({
+      action: "guardarnotaturno",
+      nombre: operador.nombre,
+      pc: operador.pc,
+      nota
+    });
+    if (r.ok) {
+      setMsg("notaTurnoMsg", "Nota guardada ✓");
+      document.getElementById("miNotaTurno").value = "";
+      cargarNotasTurnoAnteriores();
+    } else {
+      setMsg("notaTurnoMsg", r.error || "Error al guardar.");
+    }
+  }
+
+  // === COMENTARIOS EN NOVEDADES ===
+  async function toggleComentarios(id, btn) {
+    const wrap = document.getElementById("coment-" + id);
+    if (!wrap) return;
+    const visible = wrap.style.display !== "none";
+    if (visible) {
+      wrap.style.display = "none";
+      return;
+    }
+    wrap.style.display = "block";
+    _attachPasteHandler("coment-ta-" + id, "coment-preview-" + id);
+    await renderComentarios(id);
+  }
+
+  async function renderComentarios(id) {
+    const lista = document.getElementById("coment-lista-" + id);
+    if (!lista) return;
+    lista.innerHTML = "Cargando...";
+    const r = await api({ action: "getcomentariosnovedad", id });
+    if (!r.ok) { lista.innerHTML = `<div class="alert">Error: ${r.error || ""}</div>`; return; }
+
+    if (!r.comentarios || !r.comentarios.length) {
+      lista.innerHTML = `<div class="small" style="color:#888;padding:6px 0">Sin comentarios todavía.</div>`;
+      return;
+    }
+
+    const yo = (operador && operador.nombre || "").toLowerCase();
+    lista.innerHTML = r.comentarios.map(c => {
+      const esMio = String(c.autor || "").toLowerCase() === yo;
+      const ts = c.timestamp ? new Date(c.timestamp).toLocaleString("es-AR", {hour12:false}) : "";
+      const editado = c.editado ? `<span class="small" style="color:#888"> (editado)</span>` : "";
+      const imagen = c.imagenURL ? `
+        <a href="${c.imagenURL}" target="_blank" rel="noopener">
+          <img src="${c.imagenURL}" style="max-width:280px;max-height:200px;margin-top:6px;border-radius:6px;border:1px solid #444;display:block">
+        </a>` : "";
+      return `
+        <div style="background:#1a1a1a;padding:8px 12px;border-radius:6px;margin-bottom:6px;border-left:2px solid ${esMio ? "#1a73e8" : "#444"}">
+          <div class="small"><b>${c.autor || ""}</b> · ${ts}${editado}</div>
+          <div id="ctxt-${c.fila}" style="margin-top:4px;white-space:pre-wrap">${(c.texto || "").replace(/</g, "&lt;")}</div>
+          ${imagen}
+          ${esMio ? `
+            <div class="row" style="margin-top:6px;gap:6px">
+              <button class="secondary" style="width:auto;padding:4px 10px;font-size:12px" onclick="editarComentarioUI(${c.fila}, '${id}')">Editar</button>
+              <button class="warning" style="width:auto;padding:4px 10px;font-size:12px" onclick="eliminarComentarioUI(${c.fila}, '${id}')">Eliminar</button>
+            </div>
+          ` : ""}
+        </div>
+      `;
+    }).join("");
+  }
+
+  async function agregarComentarioUI(id) {
+    const ta = document.getElementById("coment-ta-" + id);
+    if (!ta) return;
+    const texto = ta.value.trim();
+    const imagen = ta._imagenPendiente || "";
+    if (!texto && !imagen) return;
+
+    const params = { action: "agregarcomentario", id, nombre: operador.nombre, nota: texto };
+    if (imagen) params.imagenBase64 = imagen;
+
+    const r = imagen ? await apiPost(params) : await api(params);
+    if (r.ok) {
+      ta.value = "";
+      ta._imagenPendiente = null;
+      const preview = document.getElementById("coment-preview-" + id);
+      if (preview) preview.innerHTML = "";
+      renderComentarios(id);
+    } else {
+      alert(r.error || "Error al agregar comentario.");
+    }
+  }
+
+  async function editarComentarioUI(fila, id) {
+    const div = document.getElementById("ctxt-" + fila);
+    if (!div) return;
+    const actual = div.textContent || "";
+    const nuevo = prompt("Editar comentario:", actual);
+    if (nuevo === null) return;
+    const texto = nuevo.trim();
+    if (!texto) return;
+    const r = await api({
+      action: "editarcomentario",
+      fila, nombre: operador.nombre, nota: texto
+    });
+    if (r.ok) renderComentarios(id);
+    else alert(r.error || "Error al editar.");
+  }
+
+  async function eliminarComentarioUI(fila, id) {
+    if (!confirm("¿Eliminar comentario?")) return;
+    const r = await api({
+      action: "eliminarcomentario",
+      fila, nombre: operador.nombre
+    });
+    if (r.ok) renderComentarios(id);
+    else alert(r.error || "Error al eliminar.");
+  }
+
+  function _bloqueComentariosHtml(id) {
+    return `
+      <div class="row" style="margin-top:6px">
+        <button class="secondary" style="width:auto;padding:6px 12px" onclick="toggleComentarios('${id}', this)">💬 Comentarios</button>
+      </div>
+      <div id="coment-${id}" style="display:none;margin-top:8px">
+        <div id="coment-lista-${id}"></div>
+        <div style="margin-top:8px">
+          <textarea id="coment-ta-${id}" placeholder="Escribir comentario... (podés pegar una imagen con Ctrl+V)" rows="2"></textarea>
+          <div id="coment-preview-${id}"></div>
+          <button class="primary" style="margin-top:4px" onclick="agregarComentarioUI('${id}')">Agregar comentario</button>
+        </div>
+      </div>
+    `;
+  }
+
   async function completarTarea(fila, texto) {
     const r = await api({ action: "completartarea", tareaId: fila, nombre: operador.nombre });
     if (r.ok) {
@@ -1243,15 +1566,18 @@
   }
 
   let _verifFails = 0;
+  let _tareasPendientesCount = 0;
+  let _novedadesPendientesCount = 0;
+
+  // Polling consolidado: 1 fetch en lugar de 3
   setInterval(async () => {
     if (!operador) return;
 
     try {
-      const activo = await api({ action: "verificaractivo", nombre: operador.nombre });
-      // Solo cerrar sesión si el backend devuelve EXPLÍCITAMENTE activo:false (no undefined, no error)
-      if (activo && activo.ok === true && activo.activo === false) {
+      const r = await api({ action: "getpoll", nombre: operador.nombre, pc: operador.pc });
+
+      if (r && r.ok === true && r.activo === false) {
         _verifFails++;
-        // Necesita 2 confirmaciones consecutivas para evitar falsos positivos por race conditions
         if (_verifFails >= 2) {
           alert("Se inhabilitó tu acceso. Comunicarte con tu superior.");
           localStorage.removeItem("operadorActivo");
@@ -1260,16 +1586,42 @@
           location.reload();
           return;
         }
-      } else {
+      } else if (r && r.ok === true) {
         _verifFails = 0;
+        cargarNovedades(r.novedades);
+        cargarTareas({ tareas: r.tareas, ultimaCompletada: r.ultimaCompletada });
+        cargarMisNovedades(r.misNovedades);
       }
     } catch (e) {
       _verifFails = 0;
     }
-
-    cargarNovedades();
-    cargarTareas();
   }, 30000);
+
+  // Notificaciones horarias (toast no-bloqueante)
+  function mostrarToast(mensaje, tipo) {
+    let cont = document.getElementById("toastContainer");
+    if (!cont) {
+      cont = document.createElement("div");
+      cont.id = "toastContainer";
+      cont.style.cssText = "position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:340px";
+      document.body.appendChild(cont);
+    }
+    const t = document.createElement("div");
+    const bg = tipo === "warning" ? "#f0b429" : (tipo === "error" ? "#d93025" : "#1a73e8");
+    t.style.cssText = `background:${bg};color:#fff;padding:14px 18px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.3);font-size:14px;cursor:pointer;animation:slideIn 0.3s ease`;
+    t.textContent = mensaje;
+    t.onclick = () => t.remove();
+    cont.appendChild(t);
+    setTimeout(() => { if (t.parentNode) t.remove(); }, 12000);
+  }
+
+  setInterval(() => {
+    if (!operador) return;
+    const partes = [];
+    if (_tareasPendientesCount > 0) partes.push(`${_tareasPendientesCount} tarea${_tareasPendientesCount > 1 ? "s" : ""} pendiente${_tareasPendientesCount > 1 ? "s" : ""}`);
+    if (_novedadesPendientesCount > 0) partes.push(`${_novedadesPendientesCount} novedad${_novedadesPendientesCount > 1 ? "es" : ""} sin revisar`);
+    if (partes.length) mostrarToast("⏰ Recordatorio: tenés " + partes.join(" y "), "warning");
+  }, 3600000);
 
   // FLOATING WIDGET
   const fwWidget = document.getElementById("floatWidget");
