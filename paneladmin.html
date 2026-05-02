@@ -131,9 +131,11 @@
       <button data-section="pcs"        onclick="cambiarSeccion('pcs')">🖥️ PCs</button>
       <button data-section="operadores" onclick="cambiarSeccion('operadores')">👤 Operadores</button>
       <button data-section="telefonos"  onclick="cambiarSeccion('telefonos')">📞 Teléfonos</button>
-      <button data-section="tareas"     onclick="cambiarSeccion('tareas')">⚡ Tareas</button>
-      <button data-section="novedades"  onclick="cambiarSeccion('novedades')">⚠️ Novedades</button>
-      <button data-section="historial"  onclick="cambiarSeccion('historial')">📋 Histórico</button>
+      <button data-section="tareas"       onclick="cambiarSeccion('tareas')">⚡ Tareas</button>
+      <button data-section="novedades"   onclick="cambiarSeccion('novedades')">⚠️ Novedades</button>
+      <button data-section="recepciones" onclick="cambiarSeccion('recepciones')">🤝 Recepciones</button>
+      <button data-section="pausas"      onclick="cambiarSeccion('pausas')">⏸️ Pausas</button>
+      <button data-section="historial"   onclick="cambiarSeccion('historial')">📋 Fichajes</button>
     </nav>
     <button class="secondary logout-btn" onclick="logoutAdmin()">Cerrar sesión</button>
   </aside>
@@ -231,17 +233,44 @@
       <div id="novedadesBox"></div>
     </section>
 
-    <!-- HISTÓRICO -->
-    <section id="section-historial" class="section">
-      <h2 class="section-title">📋 Histórico</h2>
+    <!-- RECEPCIONES -->
+    <section id="section-recepciones" class="section">
+      <h2 class="section-title">🤝 Recepciones de turno</h2>
       <div class="filter-bar">
         <div class="row">
-          <select id="filterHistTipo" onchange="cargarHistorial()">
-            <option value="fichajes">Fichajes</option>
-            <option value="pausas">Pausas</option>
-            <option value="recepciones">Recepciones</option>
-            <option value="logtelefonos">Log de teléfonos</option>
+          <select id="filterRecPC" onchange="cargarRecepciones()"><option value="">PC: todas</option></select>
+          <input id="filterRecDesde" type="date" onchange="cargarRecepciones()" />
+          <input id="filterRecHasta" type="date" onchange="cargarRecepciones()" />
+        </div>
+      </div>
+      <div id="recepcionesBox"></div>
+    </section>
+
+    <!-- PAUSAS -->
+    <section id="section-pausas" class="section">
+      <h2 class="section-title">⏸️ Pausas</h2>
+      <div class="filter-bar">
+        <div class="row">
+          <select id="filterPausaTipo" onchange="cargarPausas()">
+            <option value="">Tipo: todas</option>
+            <option value="bano">Baño</option>
+            <option value="fumar">Fumar</option>
+            <option value="limpieza">Limpieza</option>
           </select>
+          <select id="filterPausaPC" onchange="cargarPausas()"><option value="">PC: todas</option></select>
+          <input id="filterPausaDesde" type="date" onchange="cargarPausas()" />
+          <input id="filterPausaHasta" type="date" onchange="cargarPausas()" />
+          <input id="filterPausaOp" placeholder="Operador" onchange="cargarPausas()" />
+        </div>
+      </div>
+      <div id="pausasBox"></div>
+    </section>
+
+    <!-- HISTÓRICO FICHAJES -->
+    <section id="section-historial" class="section">
+      <h2 class="section-title">📋 Fichajes</h2>
+      <div class="filter-bar">
+        <div class="row">
           <input id="filterHistDesde" type="date" onchange="cargarHistorial()" />
           <input id="filterHistHasta" type="date" onchange="cargarHistorial()" />
           <select id="filterHistPC" onchange="cargarHistorial()"><option value="">PC: todas</option></select>
@@ -357,10 +386,12 @@ function cambiarSeccion(seccion) {
   if (seccion === "dashboard") cargarDashboard();
   if (seccion === "pcs") cargarPCs();
   if (seccion === "operadores") cargarOperadores();
-  if (seccion === "telefonos") cargarTelefonos();
-  if (seccion === "tareas") cargarTareas();
-  if (seccion === "novedades") cargarNovedades();
-  if (seccion === "historial") cargarHistorial();
+  if (seccion === "telefonos")   cargarTelefonos();
+  if (seccion === "tareas")      cargarTareas();
+  if (seccion === "novedades")   cargarNovedades();
+  if (seccion === "recepciones") cargarRecepciones();
+  if (seccion === "pausas")      cargarPausas();
+  if (seccion === "historial")   cargarHistorial();
 }
 
 // =========== CACHE PCs (para selectores) ===========
@@ -369,7 +400,8 @@ async function cargarPCsCache() {
   const r = await api({ action: "getpcsadmin" });
   if (!r.ok) return;
   _pcsCache = r.pcs || [];
-  ["filterOpPC", "filterTelPC", "filterTareaPC", "filterNovPC", "filterHistPC"].forEach(id => {
+  ["filterOpPC","filterTelPC","filterTareaPC","filterNovPC","filterHistPC",
+   "filterRecPC","filterPausaPC"].forEach(id => {
     const sel = document.getElementById(id);
     if (!sel) return;
     const current = sel.value;
@@ -726,9 +758,9 @@ function renderTareas() {
         return `<tr class="${completa?'inactive':''}">
           <td><b>${escape(t.pc)}</b></td>
           <td>${escape(t.tarea)}</td>
-          <td>${escape(t.fecha || "")}</td>
+          <td>${escape(fmt(t.timestamp) || t.fecha || "")}</td>
           <td><span class="badge ${completa?'green':'yellow'}">${escape(t.estado || 'Pendiente')}</span></td>
-          <td>${escape(t.fechaCompletada || "")}</td>
+          <td>${t.fechaCompletada ? escape(fmt(t.fechaCompletada)) : ""}</td>
           <td>${escape(t.completoPor || "")}</td>
           <td class="actions">
             <button class="btn-sm danger" onclick="eliminarTarea(${t.fila})">×</button>
@@ -809,66 +841,106 @@ async function eliminarNovedad(id) {
 async function cargarHistorial() {
   const box = document.getElementById("historialBox");
   box.innerHTML = '<div class="empty-state">Cargando...</div>';
-  const tipo = document.getElementById("filterHistTipo").value;
-  const desde = document.getElementById("filterHistDesde").value;
-  const hasta = document.getElementById("filterHistHasta").value;
-  const pc = document.getElementById("filterHistPC").value;
+  const desde    = document.getElementById("filterHistDesde").value;
+  const hasta    = document.getElementById("filterHistHasta").value;
+  const pc       = document.getElementById("filterHistPC").value;
   const operador = document.getElementById("filterHistOperador").value;
 
-  let r, html = "";
-  if (tipo === "fichajes") {
-    r = await api({ action: "getfichajes", desde, hasta, operador });
-    if (!r.ok || !r.fichajes.length) { box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return; }
-    html = `<table><thead><tr><th>Fecha</th><th>Hora</th><th>Operador</th><th>Turno</th><th>PC</th><th>Acción</th><th>Estado</th><th>Tarde min</th><th>Obs.</th></tr></thead>
-      <tbody>${r.fichajes.map(f => `<tr>
-        <td>${escape(fmtFecha(f.timestamp) || f.fecha)}</td>
-        <td>${escape(fmtHora(f.timestamp) || f.hora)}</td>
-        <td><b>${escape(f.nombre)}</b></td>
-        <td>${escape(f.turno)}</td><td>${escape(f.pc)}</td>
-        <td><span class="badge ${f.accion==='Ingreso'?'green':'gray'}">${escape(f.accion)}</span></td>
-        <td>${escape(f.estado)}</td><td>${escape(f.minutosTarde||'')}</td><td>${escape(f.observaciones||'')}</td>
-      </tr>`).join("")}</tbody></table>`;
-  } else if (tipo === "pausas") {
-    r = await api({ action: "getpausasadmin", desde, hasta, pc, operador });
-    if (!r.ok || !r.pausas.length) { box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return; }
-    html = `<table><thead><tr><th>Fecha</th><th>Hora salida</th><th>Tipo</th><th>Operador</th><th>PC</th><th>Regreso</th><th>Min</th><th>Excedió</th><th>Estado</th></tr></thead>
-      <tbody>${r.pausas.map(p => `<tr>
+  const r = await api({ action: "getfichajes", desde, hasta, operador });
+  if (!r.ok || !r.fichajes || !r.fichajes.length) {
+    box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return;
+  }
+  box.innerHTML = `
+    <table><thead><tr>
+      <th>Fecha</th><th>Hora</th><th>Operador</th><th>Turno</th><th>PC</th>
+      <th>Acción</th><th>Estado</th><th>Tarde min</th><th>Obs.</th>
+    </tr></thead>
+    <tbody>${r.fichajes.map(f => `<tr>
+      <td>${escape(fmtFecha(f.timestamp) || f.fecha)}</td>
+      <td>${escape(fmtHora(f.timestamp) || f.hora)}</td>
+      <td><b>${escape(f.nombre)}</b></td>
+      <td>${escape(f.turno)}</td>
+      <td>${escape(f.pc)}</td>
+      <td><span class="badge ${f.accion==='Ingreso'?'green':'gray'}">${escape(f.accion)}</span></td>
+      <td>${escape(f.estado)}</td>
+      <td>${f.minutosTarde ? `<span class="badge red">${escape(f.minutosTarde)} min</span>` : ''}</td>
+      <td>${escape(f.observaciones||'')}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+async function cargarRecepciones() {
+  const box  = document.getElementById("recepcionesBox");
+  box.innerHTML = '<div class="empty-state">Cargando...</div>';
+  const pc    = document.getElementById("filterRecPC").value;
+  const desde = document.getElementById("filterRecDesde").value;
+  const hasta = document.getElementById("filterRecHasta").value;
+
+  const r = await api({ action: "getrecepciones", pc, desde, hasta });
+  if (!r.ok || !r.recepciones || !r.recepciones.length) {
+    box.innerHTML = '<div class="empty-state">Sin recepciones registradas.</div>'; return;
+  }
+
+  box.innerHTML = r.recepciones.map(re => {
+    const cajaOk = String(re.cajaOk || "").toLowerCase();
+    const cajaBad = cajaOk === "no";
+    const waBad   = String(re.whatsappOk  || "").toLowerCase() === "no";
+    const revBad  = String(re.revinculacionOk || "").toLowerCase() === "no";
+    return `
+      <div class="card" style="margin-bottom:12px;border-left:4px solid ${cajaBad||waBad||revBad?'#d93025':'#16a765'}">
+        <div class="row" style="margin-bottom:8px;gap:14px">
+          <span><b>${escape(re.pc)}</b></span>
+          <span class="badge gray">${escape(re.turno)}</span>
+          <span>${escape(fmtFecha(re.timestamp) || re.fecha)} ${escape(fmtHora(re.timestamp))}</span>
+          <span class="small">Recibe: <b>${escape(re.recibe)}</b> — Entrega: <b>${escape(re.entrega)}</b></span>
+        </div>
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <span class="badge ${cajaBad?'red':'green'}">Caja: ${escape(re.cajaOk)}</span>
+          ${cajaBad && re.diferenciaCaja ? `<span class="badge red">Diferencia: ${escape(re.diferenciaCaja)}</span>` : ''}
+          <span class="badge ${waBad?'red':'green'}">WhatsApp: ${escape(re.whatsappOk)}</span>
+          <span class="badge ${revBad?'red':'green'}">Revinculación: ${escape(re.revinculacionOk)}</span>
+          <span class="badge ${String(re.puestoOrden||'').toLowerCase()==='no'?'red':'green'}">Orden: ${escape(re.puestoOrden)}</span>
+          <span class="badge gray">Limpieza: ${escape(re.limpieza)}</span>
+        </div>
+        ${re.observaciones ? `<p class="small" style="margin:8px 0 0;color:#bbb">${escape(re.observaciones)}</p>` : ''}
+      </div>`;
+  }).join('');
+}
+
+async function cargarPausas() {
+  const box  = document.getElementById("pausasBox");
+  box.innerHTML = '<div class="empty-state">Cargando...</div>';
+  const tipoPausa = document.getElementById("filterPausaTipo").value;
+  const pc        = document.getElementById("filterPausaPC").value;
+  const desde     = document.getElementById("filterPausaDesde").value;
+  const hasta     = document.getElementById("filterPausaHasta").value;
+  const operador  = document.getElementById("filterPausaOp").value;
+
+  const r = await api({ action: "getpausasadmin", tipoPausa, pc, desde, hasta, operador });
+  if (!r.ok || !r.pausas || !r.pausas.length) {
+    box.innerHTML = '<div class="empty-state">Sin pausas registradas.</div>'; return;
+  }
+
+  const iconos = { bano: "🚽", fumar: "🚬", limpieza: "🧹" };
+  box.innerHTML = `
+    <table><thead><tr>
+      <th>Fecha</th><th>Tipo</th><th>Operador</th><th>PC</th>
+      <th>Salida</th><th>Regreso</th><th>Min</th><th>Excedió</th><th>Estado</th>
+    </tr></thead>
+    <tbody>${r.pausas.map(p => {
+      const excedio = String(p.excedio || '').toLowerCase();
+      const excedioSi = excedio === 'sí' || excedio === 'si';
+      return `<tr>
         <td>${escape(fmtFecha(p.timestamp) || p.fecha)}</td>
+        <td>${iconos[p.tipoPausa] || ''} <span class="badge blue">${escape(p.tipoPausa)}</span></td>
+        <td><b>${escape(p.operador)}</b></td>
+        <td>${escape(p.pc)}</td>
         <td>${escape(fmtHora(p.horaSalida))}</td>
-        <td><span class="badge blue">${escape(p.tipoPausa)}</span></td>
-        <td><b>${escape(p.operador)}</b></td><td>${escape(p.pc)}</td>
         <td>${escape(fmtHora(p.horaRegreso))}</td>
         <td>${escape(p.minutos)}</td>
-        <td><span class="badge ${(String(p.excedio).toLowerCase()==='sí'||String(p.excedio).toLowerCase()==='si')?'red':'green'}">${escape(p.excedio)}</span></td>
-        <td>${escape(p.estado)}</td>
-      </tr>`).join("")}</tbody></table>`;
-  } else if (tipo === "recepciones") {
-    r = await api({ action: "getrecepciones", desde, hasta, pc });
-    if (!r.ok || !r.recepciones.length) { box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return; }
-    html = `<table><thead><tr><th>Fecha</th><th>Hora</th><th>Turno</th><th>PC</th><th>Recibe</th><th>Entrega</th><th>Caja</th><th>WhatsApp</th><th>Limpieza</th><th>Obs.</th></tr></thead>
-      <tbody>${r.recepciones.map(re => `<tr>
-        <td>${escape(fmtFecha(re.timestamp) || re.fecha)}</td>
-        <td>${escape(fmtHora(re.timestamp))}</td>
-        <td>${escape(re.turno)}</td><td><b>${escape(re.pc)}</b></td>
-        <td>${escape(re.recibe)}</td><td>${escape(re.entrega)}</td>
-        <td>${escape(re.cajaOk)}${re.diferenciaCaja?(' · '+escape(re.diferenciaCaja)):''}</td>
-        <td>${escape(re.whatsappOk)}</td><td>${escape(re.limpieza)}</td><td>${escape(re.observaciones)}</td>
-      </tr>`).join("")}</tbody></table>`;
-  } else if (tipo === "logtelefonos") {
-    r = await api({ action: "getlogtelefonosadmin", desde, hasta, pc });
-    if (!r.ok || !r.log.length) { box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return; }
-    html = `<table><thead><tr><th>Fecha</th><th>Hora caída</th><th>PC</th><th>Línea</th><th>Operador</th><th>Motivo</th><th>Levantado</th><th>Duración</th><th>Estado</th></tr></thead>
-      <tbody>${r.log.map(e => `<tr>
-        <td>${escape(fmtFecha(e.timestamp))}</td>
-        <td>${escape(fmtHora(e.horaCaida))}</td>
-        <td><b>${escape(e.pc)}</b></td><td>${escape(e.linea)}</td>
-        <td>${escape(e.operadorCaida)}</td><td>${escape(e.motivo)}</td>
-        <td>${escape(fmtHora(e.horaLevantado))}</td>
-        <td>${e.duracion ? e.duracion + ' min' : ''}</td>
-        <td><span class="badge ${e.estado==='Cerrada'?'green':'red'}">${escape(e.estado)}</span></td>
-      </tr>`).join("")}</tbody></table>`;
-  }
-  box.innerHTML = html;
+        <td><span class="badge ${excedioSi?'red':'green'}">${escape(p.excedio)}</span></td>
+        <td><span class="badge ${p.estado==='Abierta'?'yellow':'gray'}">${escape(p.estado)}</span></td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
 }
 
 // =========== MODAL ===========

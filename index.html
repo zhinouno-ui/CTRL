@@ -673,20 +673,16 @@
     const box  = document.getElementById("limpiezaAvisoBox");
     if (!r.ok || !r.pc) { card.classList.add("hidden"); return; }
 
-    const meToca = String(r.pc).toLowerCase() === String(operador.pc || "").toLowerCase()
-      && (!r.turno || r.turno === operador.turno);
-
-    const turnoHoy    = r.turno    ? ` (${r.turno})`    : "";
-    const turnoManana = r.manana && r.manana.turno ? ` (${r.manana.turno})` : "";
-    const mananaInfo  = r.manana
-      ? `<div class="small" style="margin-top:6px">Mañana limpia <b>${r.manana.pc}</b>${turnoManana}</div>`
+    const meToca = String(r.pc).toLowerCase() === String(operador.pc || "").toLowerCase();
+    const mananaInfo = r.manana
+      ? `<div class="small" style="margin-top:6px">Mañana limpia <b>${r.manana}</b></div>`
       : "";
 
     box.innerHTML = meToca
-      ? `<div class="alert">Hoy <b>${r.pc}</b>${turnoHoy} tiene la limpieza — te toca a vos.</div>
+      ? `<div class="alert">Hoy <b>${r.pc}</b> tiene la limpieza — te toca a vos.</div>
          ${mananaInfo}
          <span class="small">Rotación: ${r.rotacion.join(" → ")}</span>`
-      : `<div class="alert ok">Hoy limpia <b>${r.pc}</b>${turnoHoy}.</div>
+      : `<div class="alert ok">Hoy limpia <b>${r.pc}</b>.</div>
          ${mananaInfo}
          <span class="small">Rotación: ${r.rotacion.join(" → ")}</span>`;
     card.classList.remove("hidden");
@@ -714,40 +710,57 @@
     card.classList.remove("hidden");
   }
 
+  // Clave de estado por índice (no por nombre) para evitar colisiones si t.linea es undefined
+  function _telefKey(idx) { return "t" + idx; }
+
   function renderTelefonos() {
     const box = document.getElementById("telefonosBox");
     const estado = _telefsCargarEstado();
     const telefonos = window._telefsData || [];
 
-    box.innerHTML = telefonos.map(t => {
-      const st = estado[t.linea] || {};
+    box.innerHTML = telefonos.map((t, idx) => {
+      const key = _telefKey(idx);
+      const st = estado[key] || {};
       const caido = st.caido || false;
       const nota = st.nota || "";
+      const label = t.linea || ("Tel " + (idx + 1));
       return `
-        <div class="telef-item${caido ? " caido" : ""}" id="telef-${_telefId(t.linea)}">
+        <div class="telef-item${caido ? " caido" : ""}" data-tidx="${idx}">
           <div>
-            <span class="badge"><b>${t.linea}</b> · ${t.tipo} · ${t.numero || ""}</span>
+            <span class="badge"><b>${label}</b> · ${t.tipo || ""} · ${t.numero || ""}</span>
             ${nota ? `<span class="telef-nota">📝 ${nota}</span>` : ""}
           </div>
-          <button class="btn-icon" onclick="toggleTelefCaido('${t.linea}')" title="${caido ? "Restaurar" : "Marcar caído"}">
-            ${caido ? "✅" : "📵"}
-          </button>
-          <button class="btn-icon" onclick="editarNotaTelef('${t.linea}')" title="Agregar nota">💬</button>
-          <button class="btn-icon" onclick="mostrarLogTelef('${t.linea}')" title="Historial de caídas">ℹ️</button>
+          <button class="btn-icon tf-btn-caido" title="${caido ? "Restaurar" : "Marcar caído"}">${caido ? "✅" : "📵"}</button>
+          <button class="btn-icon tf-btn-nota"  title="Agregar nota">💬</button>
+          <button class="btn-icon tf-btn-log"   title="Historial de caídas">ℹ️</button>
         </div>`;
     }).join("");
+
+    // Event delegation — un solo listener para todo el box
+    box.onclick = (e) => {
+      const btn = e.target.closest(".btn-icon");
+      if (!btn) return;
+      const item = btn.closest("[data-tidx]");
+      if (!item) return;
+      const idx = parseInt(item.dataset.tidx);
+      if (isNaN(idx)) return;
+      if (btn.classList.contains("tf-btn-caido")) _toggleCaido(idx);
+      else if (btn.classList.contains("tf-btn-nota"))  _editarNota(idx, item);
+      else if (btn.classList.contains("tf-btn-log"))   _mostrarLog(idx, item);
+    };
   }
 
-  function _telefId(linea) { return linea.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_]/g, ""); }
-
-  async function toggleTelefCaido(linea) {
+  async function _toggleCaido(idx) {
     const estado = _telefsCargarEstado();
-    if (!estado[linea]) estado[linea] = {};
-    const ahora = !estado[linea].caido;
-    estado[linea].caido = ahora;
+    const key = _telefKey(idx);
+    if (!estado[key]) estado[key] = {};
+    const ahora = !estado[key].caido;
+    estado[key].caido = ahora;
     _telefsPersistir(estado);
     renderTelefonos();
 
+    const t = (window._telefsData || [])[idx];
+    const linea = t ? (t.linea || "") : "";
     if (ahora) {
       const motivo = prompt("Motivo de la caída (opcional):") || "";
       await api({ action: "telefonocaido", nombre: operador.nombre, pc: operador.pc, linea, motivo });
@@ -756,14 +769,12 @@
     }
   }
 
-  async function mostrarLogTelef(linea) {
-    const id = "telef-" + _telefId(linea);
-    const item = document.getElementById(id);
-    if (!item) return;
-
+  async function _mostrarLog(idx, item) {
     const existente = item.querySelector(".telef-log-panel");
     if (existente) { existente.remove(); return; }
 
+    const t = (window._telefsData || [])[idx];
+    const linea = t ? (t.linea || "") : "";
     const r = await api({ action: "getlogtelefono", linea, pc: operador.pc });
     const panel = document.createElement("div");
     panel.className = "telef-log-panel";
@@ -773,9 +784,9 @@
     } else {
       panel.innerHTML = r.log.map(e => `
         <div class="telef-log-entry">
-          <span class="small"><b>Caída:</b> ${e.horaCaida} — ${e.operadorCaida || ""}${e.motivo ? " · " + e.motivo : ""}</span><br>
+          <span class="small"><b>Caída:</b> ${e.horaCaida || ""} — ${e.operadorCaida || ""}${e.motivo ? " · " + e.motivo : ""}</span><br>
           <span class="small">${e.estado === "Cerrada"
-            ? `Levantado: ${e.horaLevantado} (${e.duracion} min) — ${e.operadorLevanta || ""}`
+            ? "Levantado: " + (e.horaLevantado || "") + " (" + (e.duracion || 0) + " min) — " + (e.operadorLevanta || "")
             : "<b style='color:#f88'>Abierta</b>"
           }</span>
         </div>`).join("");
@@ -783,12 +794,10 @@
     item.appendChild(panel);
   }
 
-  function editarNotaTelef(linea) {
+  function _editarNota(idx, item) {
     const estado = _telefsCargarEstado();
-    const actual = (estado[linea] || {}).nota || "";
-    const id = "telef-" + _telefId(linea);
-    const item = document.getElementById(id);
-    if (!item) return;
+    const key = _telefKey(idx);
+    const actual = (estado[key] || {}).nota || "";
 
     const yaAbierto = item.querySelector(".telef-nota-input");
     if (yaAbierto) { yaAbierto.focus(); return; }
@@ -802,12 +811,13 @@
     inp.focus();
 
     function guardar() {
-      if (!estado[linea]) estado[linea] = {};
-      estado[linea].nota = inp.value.trim();
-      _telefsPersistir(estado);
+      const e2 = _telefsCargarEstado();
+      if (!e2[key]) e2[key] = {};
+      e2[key].nota = inp.value.trim();
+      _telefsPersistir(e2);
       renderTelefonos();
     }
-    inp.addEventListener("keydown", e => { if (e.key === "Enter") guardar(); if (e.key === "Escape") renderTelefonos(); });
+    inp.addEventListener("keydown", ev => { if (ev.key === "Enter") guardar(); if (ev.key === "Escape") renderTelefonos(); });
     inp.addEventListener("blur", guardar);
   }
 

@@ -825,9 +825,6 @@ function getPCs_() {
   return { ok: true, pcs };
 }
 
-// Turnos que rotan para la limpieza, independiente de qué PC toca
-const TURNOS_LIMPIEZA = ['TM', 'TT', 'TN'];
-
 function getLimpiezaHoy_() {
   const r = getPCs_();
   if (!r.pcs.length) return { ok: true, pc: null };
@@ -836,24 +833,15 @@ function getLimpiezaHoy_() {
   const dia = Math.floor(
     (Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate())) / (24 * 3600 * 1000)
   );
-
-  const nPCs    = r.pcs.length;
-  const nTurnos = TURNOS_LIMPIEZA.length;
-
-  function pcDia(d)    { return r.pcs[((d % nPCs)    + nPCs)    % nPCs]; }
-  function turnoDia(d) { return TURNOS_LIMPIEZA[((d % nTurnos) + nTurnos) % nTurnos]; }
-
-  const hoyPC     = pcDia(dia);
-  const hoyTurno  = turnoDia(dia);
-  const manPC     = pcDia(dia + 1);
-  const manTurno  = turnoDia(dia + 1);
+  const n = r.pcs.length;
+  const hoy    = r.pcs[((dia     % n) + n) % n];
+  const manana = r.pcs[((dia + 1 % n) + n) % n];
 
   return {
     ok:      true,
-    pc:      hoyPC.pc,
-    turno:   hoyTurno,
+    pc:      hoy.pc,
     fecha:   fecha_(ahora),
-    manana:  { pc: manPC.pc, turno: manTurno },
+    manana:  manana.pc,
     rotacion: r.pcs.map(p => p.pc)
   };
 }
