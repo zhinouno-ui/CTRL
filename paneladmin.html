@@ -102,6 +102,27 @@
   .stat .stat-num { font-size:24px; font-weight:bold; }
   .stat .stat-label { font-size:11px; color:#aaa; text-transform:uppercase; }
 
+  .stats-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:18px; }
+  .stat-card { background:#1f2937; padding:14px 16px; border-radius:10px; border-left:4px solid #1a73e8; }
+  .stat-card.green { border-left-color:#3eb368; }
+  .stat-card.yellow { border-left-color:#f0b429; }
+  .stat-card.red { border-left-color:#d93025; }
+  .stat-card.gray { border-left-color:#6b7280; }
+  .stat-card .num { font-size:26px; font-weight:bold; color:#fff; }
+  .stat-card .lbl { font-size:11px; color:#bbb; text-transform:uppercase; letter-spacing:0.5px; margin-top:2px; }
+  .stat-card .sub { font-size:11px; color:#888; margin-top:4px; }
+
+  .bar-chart { background:#1a1a1a; padding:14px; border-radius:10px; margin-bottom:18px; }
+  .bar-chart h4 { margin:0 0 10px; font-size:13px; color:#bbb; text-transform:uppercase; letter-spacing:0.5px; }
+  .bar-row { display:flex; align-items:center; margin-bottom:6px; gap:10px; }
+  .bar-row .lbl { width:140px; font-size:13px; color:#ddd; }
+  .bar-row .bar-wrap { flex:1; background:#222; border-radius:4px; overflow:hidden; height:18px; position:relative; }
+  .bar-row .bar { height:100%; background:#1a73e8; transition:width 0.3s; }
+  .bar-row .bar.green { background:#3eb368; }
+  .bar-row .bar.yellow { background:#f0b429; }
+  .bar-row .bar.red { background:#d93025; }
+  .bar-row .val { width:60px; text-align:right; font-size:12px; color:#ddd; }
+
   .top-actions { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; }
 </style>
 </head>
@@ -135,6 +156,7 @@
       <button data-section="novedades"   onclick="cambiarSeccion('novedades')">⚠️ Novedades</button>
       <button data-section="recepciones" onclick="cambiarSeccion('recepciones')">🤝 Recepciones</button>
       <button data-section="pausas"      onclick="cambiarSeccion('pausas')">⏸️ Pausas</button>
+      <button data-section="notas"       onclick="cambiarSeccion('notas')">📝 Notas turno</button>
       <button data-section="historial"   onclick="cambiarSeccion('historial')">📋 Fichajes</button>
     </nav>
     <button class="secondary logout-btn" onclick="logoutAdmin()">Cerrar sesión</button>
@@ -266,6 +288,20 @@
       <div id="pausasBox"></div>
     </section>
 
+    <!-- NOTAS DE TURNO -->
+    <section id="section-notas" class="section">
+      <h2 class="section-title">📝 Notas de turno</h2>
+      <div class="filter-bar">
+        <div class="row">
+          <select id="filterNotaPC" onchange="cargarNotas()"><option value="">PC: todas</option></select>
+          <input id="filterNotaOp" placeholder="Operador" onchange="cargarNotas()" />
+          <input id="filterNotaDesde" type="date" onchange="cargarNotas()" />
+          <input id="filterNotaHasta" type="date" onchange="cargarNotas()" />
+        </div>
+      </div>
+      <div id="notasBox"></div>
+    </section>
+
     <!-- HISTÓRICO FICHAJES -->
     <section id="section-historial" class="section">
       <h2 class="section-title">📋 Fichajes</h2>
@@ -333,11 +369,130 @@ async function api(params) {
   }
 }
 
+async function apiPost(params) {
+  try {
+    const body = { ...params, nombre: params.nombre || (admin ? admin.nombre : "") };
+    const res = await fetch(API_URL + "?_t=" + Date.now(), {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(body),
+      cache: "no-store"
+    });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function _comprimirImagen(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1600;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) {
+          const ratio = Math.min(MAX / w, MAX / h);
+          w = Math.round(w * ratio); h = Math.round(h * ratio);
+        }
+        const c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        c.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(c.toDataURL("image/jpeg", 0.72));
+      };
+      img.onerror = () => reject(new Error("No se pudo cargar la imagen"));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function _attachPasteHandler(textareaId, previewId) {
+  const ta = document.getElementById(textareaId);
+  if (!ta || ta._pasteAttached) return;
+  ta._pasteAttached = true;
+  ta.addEventListener("paste", async (e) => {
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type && items[i].type.indexOf("image/") === 0) {
+        e.preventDefault();
+        const file = items[i].getAsFile();
+        if (!file) return;
+        const preview = document.getElementById(previewId);
+        if (preview) preview.innerHTML = '<span style="color:#888;font-size:12px">Comprimiendo...</span>';
+        try {
+          const dataUrl = await _comprimirImagen(file);
+          ta._imagenPendiente = dataUrl;
+          if (preview) preview.innerHTML = `
+            <div style="margin-top:6px">
+              <img src="${dataUrl}" style="max-width:240px;max-height:160px;border-radius:6px;border:1px solid #444;display:block">
+              <button class="btn-sm warning" style="margin-top:4px" onclick="_cancelarImagen('${textareaId}', '${previewId}')">Quitar</button>
+            </div>`;
+        } catch (err) {
+          if (preview) preview.innerHTML = '<span style="color:#d93025">Error: ' + err.message + '</span>';
+        }
+        break;
+      }
+    }
+  });
+}
+
+function _cancelarImagen(textareaId, previewId) {
+  const ta = document.getElementById(textareaId);
+  if (ta) ta._imagenPendiente = null;
+  const preview = document.getElementById(previewId);
+  if (preview) preview.innerHTML = "";
+}
+
 function setMsg(id, msg, ok) {
   const el = document.getElementById(id);
   if (!el) return;
   el.textContent = msg || "";
   el.className = "msg" + (ok ? " ok" : "");
+}
+
+// =========== HELPERS DE METRICAS ===========
+
+function _statsHtml(cards) {
+  return `<div class="stats-grid">${cards.map(c => `
+    <div class="stat-card ${c.color || ''}">
+      <div class="num">${c.num}</div>
+      <div class="lbl">${escape(c.label)}</div>
+      ${c.sub ? `<div class="sub">${escape(c.sub)}</div>` : ""}
+    </div>
+  `).join("")}</div>`;
+}
+
+function _barChartHtml(titulo, items, colorMap) {
+  if (!items.length) return "";
+  const max = Math.max(...items.map(i => i.value), 1);
+  return `
+    <div class="bar-chart">
+      <h4>${escape(titulo)}</h4>
+      ${items.map(i => `
+        <div class="bar-row">
+          <div class="lbl">${escape(i.label)}</div>
+          <div class="bar-wrap"><div class="bar ${colorMap && colorMap[i.label] || ''}" style="width:${(i.value/max*100).toFixed(1)}%"></div></div>
+          <div class="val">${i.value}${i.suffix||''}</div>
+        </div>
+      `).join("")}
+    </div>`;
+}
+
+function _agruparContar(arr, keyFn) {
+  const m = {};
+  arr.forEach(x => {
+    const k = keyFn(x) || "(s/d)";
+    m[k] = (m[k] || 0) + 1;
+  });
+  return Object.keys(m).map(k => ({ label: k, value: m[k] })).sort((a,b) => b.value - a.value);
+}
+
+function _promedio(arr) {
+  if (!arr.length) return 0;
+  return Math.round(arr.reduce((s,x) => s+x, 0) / arr.length * 10) / 10;
 }
 
 // =========== LOGIN ===========
@@ -391,6 +546,7 @@ function cambiarSeccion(seccion) {
   if (seccion === "novedades")   cargarNovedades();
   if (seccion === "recepciones") cargarRecepciones();
   if (seccion === "pausas")      cargarPausas();
+  if (seccion === "notas")       cargarNotas();
   if (seccion === "historial")   cargarHistorial();
 }
 
@@ -401,7 +557,7 @@ async function cargarPCsCache() {
   if (!r.ok) return;
   _pcsCache = r.pcs || [];
   ["filterOpPC","filterTelPC","filterTareaPC","filterNovPC","filterHistPC",
-   "filterRecPC","filterPausaPC"].forEach(id => {
+   "filterRecPC","filterPausaPC","filterNotaPC"].forEach(id => {
     const sel = document.getElementById(id);
     if (!sel) return;
     const current = sel.value;
@@ -544,9 +700,35 @@ function renderOperadores() {
     return true;
   });
 
-  if (!ops.length) { box.innerHTML = '<div class="empty-state">Sin resultados.</div>'; return; }
+  // === METRICAS ===
+  const total = _operadoresCache.length;
+  const activos = _operadoresCache.filter(o => { const a=String(o.Activo||"").toLowerCase(); return a==="sí"||a==="si"; }).length;
+  const inactivos = total - activos;
+  const franqueros = _operadoresCache.filter(o => String(o.Tipo||"").toLowerCase().indexOf("franq") !== -1).length;
+  const admins = _operadoresCache.filter(o => String(o.Tipo||"").toLowerCase().indexOf("admin") !== -1).length;
 
-  box.innerHTML = `
+  const statsHtml = _statsHtml([
+    { num: total, label: "Total", color: "gray" },
+    { num: activos, label: "Activos", color: "green" },
+    { num: inactivos, label: "Inactivos", color: "red" },
+    { num: franqueros, label: "Franqueros", color: "yellow" },
+    { num: admins, label: "Admins", color: "" }
+  ]);
+
+  const porTurno = _agruparContar(_operadoresCache, o => o.Turno);
+  const porTipo = _agruparContar(_operadoresCache, o => o.Tipo);
+  const charts = `
+    <div class="grid cols-2">
+      ${_barChartHtml("Por turno", porTurno)}
+      ${_barChartHtml("Por tipo", porTipo)}
+    </div>`;
+
+  if (!ops.length) {
+    box.innerHTML = statsHtml + charts + '<div class="empty-state">Sin resultados.</div>';
+    return;
+  }
+
+  box.innerHTML = statsHtml + charts + `
     <table>
       <thead><tr>
         <th>Nombre</th><th>PIN</th><th>Turno</th><th>PC</th><th>Tipo</th><th>Activo</th><th></th>
@@ -748,9 +930,25 @@ function renderTareas() {
     return true;
   });
 
-  if (!tareas.length) { box.innerHTML = '<div class="empty-state">Sin tareas.</div>'; return; }
+  // === METRICAS ===
+  const total = _tareasCache.length;
+  const compl = _tareasCache.filter(t => String(t.estado||"").toLowerCase() === "completada").length;
+  const pend = total - compl;
+  const tasaCompletado = total ? Math.round(compl/total*100) : 0;
 
-  box.innerHTML = `
+  const statsHtml = _statsHtml([
+    { num: total, label: "Total", color: "gray" },
+    { num: pend, label: "Pendientes", color: pend>0?"yellow":"green" },
+    { num: compl, label: "Completadas", color: "green" },
+    { num: tasaCompletado + "%", label: "Tasa completado", color: tasaCompletado>=70?"green":(tasaCompletado>=40?"yellow":"red") }
+  ]);
+
+  const porPC = _agruparContar(_tareasCache, t => t.pc);
+  const charts = _barChartHtml("Tareas por PC", porPC);
+
+  if (!tareas.length) { box.innerHTML = statsHtml + charts + '<div class="empty-state">Sin tareas en el filtro.</div>'; return; }
+
+  box.innerHTML = statsHtml + charts + `
     <table>
       <thead><tr><th>PC</th><th>Tarea</th><th>Asignada</th><th>Estado</th><th>Completada</th><th>Por</th><th></th></tr></thead>
       <tbody>${tareas.map(t => {
@@ -798,9 +996,35 @@ async function cargarNovedades() {
   const estado = document.getElementById("filterNovEstado").value;
   const r = await api({ action: "getnovedadesadmin", pc, estado });
   if (!r.ok) { box.innerHTML = '<div class="empty-state">Error.</div>'; return; }
-  if (!r.novedades.length) { box.innerHTML = '<div class="empty-state">Sin novedades.</div>'; return; }
 
-  box.innerHTML = `
+  // === METRICAS ===
+  const all = r.novedades || [];
+  const pendientes = all.filter(n => String(n.estado||"").toLowerCase() === "pendiente").length;
+  const seguimiento = all.filter(n => String(n.estado||"").toLowerCase() === "en seguimiento").length;
+  const resueltas = all.filter(n => String(n.estado||"").toLowerCase() === "resuelta").length;
+  const altas = all.filter(n => String(n.prioridad||"").toLowerCase() === "alta").length;
+
+  const statsHtml = _statsHtml([
+    { num: all.length, label: "Total filtradas", color: "gray" },
+    { num: pendientes, label: "Pendientes", color: pendientes>0?"red":"" },
+    { num: seguimiento, label: "En seguimiento", color: "yellow" },
+    { num: resueltas, label: "Resueltas", color: "green" },
+    { num: altas, label: "Prioridad alta", color: altas>0?"red":"" }
+  ]);
+
+  const porTipo = _agruparContar(all, n => n.tipo);
+  const porPrioridad = _agruparContar(all, n => n.prioridad);
+  const porPC = _agruparContar(all, n => n.pc);
+  const charts = `
+    <div class="grid cols-2">
+      ${_barChartHtml("Por tipo", porTipo)}
+      ${_barChartHtml("Por prioridad", porPrioridad, {"Alta":"red","Media":"yellow","Baja":"green"})}
+    </div>
+    ${_barChartHtml("Por PC", porPC)}`;
+
+  if (!all.length) { box.innerHTML = statsHtml + '<div class="empty-state">Sin novedades.</div>'; return; }
+
+  box.innerHTML = statsHtml + charts + `
     <table>
       <thead><tr><th>Fecha</th><th>PC</th><th>Operador</th><th>Tipo</th><th>Prioridad</th><th>Detalle</th><th>Estado</th><th>Resolución</th><th></th></tr></thead>
       <tbody>${r.novedades.map(n => `
@@ -814,6 +1038,7 @@ async function cargarNovedades() {
           <td><span class="badge ${(String(n.estado).toLowerCase()==='resuelta')?'green':((String(n.estado).toLowerCase()==='en seguimiento')?'yellow':'red')}">${escape(n.estado)}</span></td>
           <td>${escape(n.resolucion || "")}</td>
           <td class="actions">
+            <button class="btn-sm" onclick="abrirThreadComentarios('${escape(n.id)}')">💬</button>
             <button class="btn-sm warning" onclick="cambiarEstadoNovedad('${escape(n.id)}', 'En seguimiento')">Seguimiento</button>
             <button class="btn-sm success" onclick="cambiarEstadoNovedad('${escape(n.id)}', 'Resuelta')">Resolver</button>
             <button class="btn-sm danger" onclick="eliminarNovedad('${escape(n.id)}')">×</button>
@@ -876,11 +1101,30 @@ async function cargarRecepciones() {
   const hasta = document.getElementById("filterRecHasta").value;
 
   const r = await api({ action: "getrecepciones", pc, desde, hasta });
-  if (!r.ok || !r.recepciones || !r.recepciones.length) {
-    box.innerHTML = '<div class="empty-state">Sin recepciones registradas.</div>'; return;
-  }
+  if (!r.ok) { box.innerHTML = '<div class="empty-state">Error.</div>'; return; }
 
-  box.innerHTML = r.recepciones.map(re => {
+  // === METRICAS ===
+  const all = r.recepciones || [];
+  const total = all.length;
+  const ok = (v) => { const s = String(v||"").toLowerCase(); return s==="sí"||s==="si"; };
+  const cajaOk = all.filter(re => ok(re.cajaOk)).length;
+  const waOk   = all.filter(re => ok(re.whatsappOk)).length;
+  const revOk  = all.filter(re => ok(re.revinculacionOk)).length;
+  const ordenOk = all.filter(re => ok(re.puestoOrden)).length;
+  const pct = (n) => total ? Math.round(n/total*100) : 0;
+  const colorPct = (p) => p>=90?"green":(p>=70?"yellow":"red");
+
+  const statsHtml = _statsHtml([
+    { num: total, label: "Total recepciones", color: "gray" },
+    { num: pct(cajaOk) + "%", label: "Caja OK", color: colorPct(pct(cajaOk)) },
+    { num: pct(waOk) + "%", label: "WhatsApp OK", color: colorPct(pct(waOk)) },
+    { num: pct(revOk) + "%", label: "Revinculación OK", color: colorPct(pct(revOk)) },
+    { num: pct(ordenOk) + "%", label: "Puesto en orden", color: colorPct(pct(ordenOk)) }
+  ]);
+
+  if (!total) { box.innerHTML = statsHtml + '<div class="empty-state">Sin recepciones registradas.</div>'; return; }
+
+  box.innerHTML = statsHtml + r.recepciones.map(re => {
     const cajaOk = String(re.cajaOk || "").toLowerCase();
     const cajaBad = cajaOk === "no";
     const waBad   = String(re.whatsappOk  || "").toLowerCase() === "no";
@@ -916,12 +1160,36 @@ async function cargarPausas() {
   const operador  = document.getElementById("filterPausaOp").value;
 
   const r = await api({ action: "getpausasadmin", tipoPausa, pc, desde, hasta, operador });
-  if (!r.ok || !r.pausas || !r.pausas.length) {
-    box.innerHTML = '<div class="empty-state">Sin pausas registradas.</div>'; return;
-  }
+  if (!r.ok) { box.innerHTML = '<div class="empty-state">Error.</div>'; return; }
+
+  // === METRICAS ===
+  const all = r.pausas || [];
+  const abiertas = all.filter(p => p.estado === "Abierta").length;
+  const cerradas = all.length - abiertas;
+  const excedidas = all.filter(p => { const e=String(p.excedio||"").toLowerCase(); return e==="sí"||e==="si"; }).length;
+  const minutosCerradas = all.filter(p => p.estado !== "Abierta" && Number(p.minutos)).map(p => Number(p.minutos));
+  const promedio = _promedio(minutosCerradas);
+
+  const statsHtml = _statsHtml([
+    { num: all.length, label: "Total", color: "gray" },
+    { num: abiertas, label: "Abiertas ahora", color: abiertas>0?"yellow":"" },
+    { num: cerradas, label: "Cerradas", color: "" },
+    { num: promedio + " min", label: "Duración promedio", color: promedio>10?"red":(promedio>7?"yellow":"green") },
+    { num: excedidas, label: "Excedieron 10 min", color: excedidas>0?"red":"green" }
+  ]);
+
+  const porTipo = _agruparContar(all, p => p.tipoPausa);
+  const porPC = _agruparContar(all, p => p.pc);
+  const charts = `
+    <div class="grid cols-2">
+      ${_barChartHtml("Por tipo", porTipo)}
+      ${_barChartHtml("Por PC", porPC)}
+    </div>`;
+
+  if (!all.length) { box.innerHTML = statsHtml + '<div class="empty-state">Sin pausas registradas.</div>'; return; }
 
   const iconos = { bano: "🚽", fumar: "🚬", limpieza: "🧹" };
-  box.innerHTML = `
+  box.innerHTML = statsHtml + charts + `
     <table><thead><tr>
       <th>Fecha</th><th>Tipo</th><th>Operador</th><th>PC</th>
       <th>Salida</th><th>Regreso</th><th>Min</th><th>Excedió</th><th>Estado</th>
@@ -941,6 +1209,118 @@ async function cargarPausas() {
         <td><span class="badge ${p.estado==='Abierta'?'yellow':'gray'}">${escape(p.estado)}</span></td>
       </tr>`;
     }).join('')}</tbody></table>`;
+}
+
+// =========== NOTAS DE TURNO ===========
+
+async function cargarNotas() {
+  const box = document.getElementById("notasBox");
+  box.innerHTML = '<div class="empty-state">Cargando...</div>';
+  const pc = document.getElementById("filterNotaPC").value;
+  const operador = document.getElementById("filterNotaOp").value.trim();
+  const desde = document.getElementById("filterNotaDesde").value;
+  const hasta = document.getElementById("filterNotaHasta").value;
+  const r = await api({ action: "getnotasturno", pc, operador, desde, hasta });
+  if (!r.ok) { box.innerHTML = '<div class="empty-state">Error.</div>'; return; }
+  if (!r.notas.length) { box.innerHTML = '<div class="empty-state">Sin notas.</div>'; return; }
+  box.innerHTML = `
+    <table>
+      <thead><tr><th>Fecha</th><th>Turno</th><th>PC</th><th>Operador</th><th>Nota</th></tr></thead>
+      <tbody>${r.notas.map(n => `
+        <tr>
+          <td>${escape(fmt(n.timestamp))}</td>
+          <td>${escape(n.turno)}</td>
+          <td><b>${escape(n.pc)}</b></td>
+          <td>${escape(n.operador)}</td>
+          <td style="white-space:pre-wrap">${escape(n.nota)}</td>
+        </tr>`).join("")}</tbody>
+    </table>`;
+}
+
+// =========== COMENTARIOS NOVEDADES ===========
+
+async function abrirThreadComentarios(id) {
+  abrirModal({
+    titulo: "💬 Comentarios — " + id,
+    html: `
+      <div id="threadLista">Cargando...</div>
+      <div style="margin-top:12px;border-top:1px solid #444;padding-top:12px">
+        <textarea id="threadInput" placeholder="Escribir comentario... (Ctrl+V para pegar imagen)" rows="2"></textarea>
+        <div id="threadPreview"></div>
+        <button class="success" style="margin-top:6px" onclick="_threadAgregar('${escape(id)}')">Agregar comentario</button>
+      </div>
+    `,
+    soloLectura: true
+  });
+  _attachPasteHandler("threadInput", "threadPreview");
+  await _threadRender(id);
+}
+
+async function _threadRender(id) {
+  const lista = document.getElementById("threadLista");
+  if (!lista) return;
+  const r = await api({ action: "getcomentariosnovedad", id });
+  if (!r.ok) { lista.innerHTML = `<div class="empty-state">Error: ${escape(r.error)}</div>`; return; }
+  if (!r.comentarios.length) {
+    lista.innerHTML = `<div class="empty-state">Sin comentarios.</div>`;
+    return;
+  }
+  const yo = (admin && admin.nombre || "").toLowerCase();
+  lista.innerHTML = r.comentarios.map(c => {
+    const esMio = String(c.autor || "").toLowerCase() === yo;
+    const editado = c.editado ? ` <span style="color:#888;font-size:11px">(editado)</span>` : "";
+    const imagen = c.imagenURL ? `
+      <a href="${escape(c.imagenURL)}" target="_blank" rel="noopener">
+        <img src="${escape(c.imagenURL)}" style="max-width:300px;max-height:220px;margin-top:6px;border-radius:6px;border:1px solid #444;display:block">
+      </a>` : "";
+    return `
+      <div style="background:#222;padding:10px 14px;border-radius:6px;margin-bottom:8px;border-left:3px solid ${esMio ? "#1a73e8" : "#444"}">
+        <div style="font-size:12px;color:#bbb"><b>${escape(c.autor)}</b> · ${escape(fmt(c.timestamp))}${editado}</div>
+        <div style="margin-top:4px;white-space:pre-wrap">${escape(c.texto)}</div>
+        ${imagen}
+        <div style="margin-top:6px;display:flex;gap:6px">
+          <button class="btn-sm" onclick="_threadEditar(${c.fila}, '${escape(id)}')">Editar</button>
+          <button class="btn-sm danger" onclick="_threadEliminar(${c.fila}, '${escape(id)}')">Eliminar</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function _threadAgregar(id) {
+  const ta = document.getElementById("threadInput");
+  if (!ta) return;
+  const texto = ta.value.trim();
+  const imagen = ta._imagenPendiente || "";
+  if (!texto && !imagen) return;
+  const params = { action: "agregarcomentario", id, nota: texto };
+  if (imagen) params.imagenBase64 = imagen;
+  const r = imagen ? await apiPost(params) : await api(params);
+  if (!r.ok) return alert(r.error);
+  ta.value = "";
+  ta._imagenPendiente = null;
+  const preview = document.getElementById("threadPreview");
+  if (preview) preview.innerHTML = "";
+  await _threadRender(id);
+}
+
+async function _threadEditar(fila, id) {
+  const div = document.querySelector(`#threadLista [data-fila="${fila}"]`);
+  // texto original — pedimos por prompt
+  const nuevo = prompt("Editar comentario:");
+  if (nuevo === null) return;
+  const texto = nuevo.trim();
+  if (!texto) return;
+  const r = await api({ action: "editarcomentario", fila, nota: texto });
+  if (!r.ok) return alert(r.error);
+  await _threadRender(id);
+}
+
+async function _threadEliminar(fila, id) {
+  if (!confirm("¿Eliminar comentario?")) return;
+  const r = await api({ action: "eliminarcomentario", fila });
+  if (!r.ok) return alert(r.error);
+  await _threadRender(id);
 }
 
 // =========== MODAL ===========
