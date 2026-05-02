@@ -1194,17 +1194,29 @@
     }
   }
 
+  let _verifFails = 0;
   setInterval(async () => {
     if (!operador) return;
 
-    const activo = await api({ action: "verificaractivo", nombre: operador.nombre });
-    if (activo.ok && activo.activo === false) {
-      alert("Se inhabilitó tu acceso. Comunicarte con tu superior.");
-      localStorage.removeItem("operadorActivo");
-      localStorage.removeItem("historialPausas");
-      operador = null;
-      location.reload();
-      return;
+    try {
+      const activo = await api({ action: "verificaractivo", nombre: operador.nombre });
+      // Solo cerrar sesión si el backend devuelve EXPLÍCITAMENTE activo:false (no undefined, no error)
+      if (activo && activo.ok === true && activo.activo === false) {
+        _verifFails++;
+        // Necesita 2 confirmaciones consecutivas para evitar falsos positivos por race conditions
+        if (_verifFails >= 2) {
+          alert("Se inhabilitó tu acceso. Comunicarte con tu superior.");
+          localStorage.removeItem("operadorActivo");
+          localStorage.removeItem("historialPausas");
+          operador = null;
+          location.reload();
+          return;
+        }
+      } else {
+        _verifFails = 0;
+      }
+    } catch (e) {
+      _verifFails = 0;
     }
 
     cargarNovedades();

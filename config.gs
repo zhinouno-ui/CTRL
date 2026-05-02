@@ -66,6 +66,33 @@ function manejarAccion_(datos) {
   if (datos.action === 'getlogtelefono') return json_(getLogTelefono_(datos));
   if (datos.action === 'notarnovedad') return json_(notarNovedad_(datos));
 
+  // === ADMIN ===
+  if (datos.action === 'loginadmin') return json_(loginAdmin_(datos));
+  if (datos.action === 'getdashboard') return json_(adminGuard_(datos, getDashboard_));
+  if (datos.action === 'getoperadoresadmin') return json_(adminGuard_(datos, getOperadoresAdmin_));
+  if (datos.action === 'crearoperador') return json_(adminGuard_(datos, crearOperador_));
+  if (datos.action === 'editaroperador') return json_(adminGuard_(datos, editarOperador_));
+  if (datos.action === 'eliminaroperador') return json_(adminGuard_(datos, eliminarOperador_));
+  if (datos.action === 'setactivoperador') return json_(adminGuard_(datos, setActivoOperador_));
+  if (datos.action === 'setpinoperador') return json_(adminGuard_(datos, setPinOperador_));
+  if (datos.action === 'gettelefonosadmin') return json_(adminGuard_(datos, getTelefonosAdmin_));
+  if (datos.action === 'creartelefono') return json_(adminGuard_(datos, crearTelefono_));
+  if (datos.action === 'editartelefono') return json_(adminGuard_(datos, editarTelefono_));
+  if (datos.action === 'eliminartelefono') return json_(adminGuard_(datos, eliminarTelefono_));
+  if (datos.action === 'creartarea') return json_(adminGuard_(datos, crearTarea_));
+  if (datos.action === 'eliminartarea') return json_(adminGuard_(datos, eliminarTareaAdmin_));
+  if (datos.action === 'gettareasadmin') return json_(adminGuard_(datos, getTareasAdmin_));
+  if (datos.action === 'getnovedadesadmin') return json_(adminGuard_(datos, getNovedadesAdmin_));
+  if (datos.action === 'eliminarnovedad') return json_(adminGuard_(datos, eliminarNovedad_));
+  if (datos.action === 'getpcsadmin') return json_(adminGuard_(datos, getPCsAdmin_));
+  if (datos.action === 'crearpc') return json_(adminGuard_(datos, crearPC_));
+  if (datos.action === 'editarpc') return json_(adminGuard_(datos, editarPC_));
+  if (datos.action === 'eliminarpc') return json_(adminGuard_(datos, eliminarPC_));
+  if (datos.action === 'getfichajes') return json_(adminGuard_(datos, getFichajes_));
+  if (datos.action === 'getpausasadmin') return json_(adminGuard_(datos, getPausasAdmin_));
+  if (datos.action === 'getrecepciones') return json_(adminGuard_(datos, getRecepciones_));
+  if (datos.action === 'getlogtelefonosadmin') return json_(adminGuard_(datos, getLogTelefonosAdmin_));
+
   return json_({
     ok: true,
     mensaje: 'API activa',
@@ -106,6 +133,28 @@ function normalizarDatos_(data) {
     motivo: data.motivo || '',
     nota: data.nota || '',
     tareaId: data.tareaId || data.fila || '',
+    fila: data.fila || 0,
+
+    // admin
+    nombreOriginal: data.nombreOriginal || '',
+    pinNuevo: data.pinNuevo || '',
+    activo: typeof data.activo === 'boolean' ? data.activo : (data.activo === undefined ? null : String(data.activo)),
+    turno: data.turno || '',
+    rol: data.rol || '',
+    tareaTexto: data.tareaTexto || '',
+    lineaOriginal: data.lineaOriginal || '',
+    pcOriginal: data.pcOriginal || '',
+    estadoEsperado: data.estadoEsperado || '',
+    activoEnSistema: data.activoEnSistema || '',
+    numero: data.numero || '',
+    pcNuevo: data.pcNuevo || '',
+    orden: data.orden || 0,
+    estadoPC: data.estadoPC || '',
+    desde: data.desde || '',
+    hasta: data.hasta || '',
+    operador: data.operador || '',
+    tipoPausa: data.tipoPausa || '',
+    limit: parseInt(data.limit || 200),
 
     id: data.id || '',
     estado: data.estado || '',
@@ -366,11 +415,23 @@ function ficharIngreso_(datos) {
 }
 
 function ficharSalida_(datos) {
-  const op = getOperador_(datos.nombre);
-  if (!op) return { ok: false, error: 'Operador no encontrado.' };
+  // Buscar operador SIN filtrar por activo (para que pueda salir aún si fue desactivado mid-sesión)
+  const todos = filas_(HOJAS.OPERADORES);
+  const nombreLower = String(datos.nombre || '').trim().toLowerCase();
+  const op = todos.find(o => String(o.Nombre || '').trim().toLowerCase() === nombreLower);
+
+  if (!op) {
+    // Aún si no se encuentra, escribir la salida con datos mínimos para no dejar la sesión abierta
+    const ahora = new Date();
+    hoja_(HOJAS.FICHAJES).appendRow([
+      new Date(), fecha_(ahora), datos.nombre || '', '', '', '',
+      'Salida', hora_(ahora), 'Salida OK (operador no resuelto)', '',
+      datos.observaciones || ''
+    ]);
+    return { ok: true, accion: 'Salida', hora: hora_(ahora), pausasCerradas: [] };
+  }
 
   const cerradas = cerrarPausasAbiertasDe_(op.Nombre);
-
   const ahora = new Date();
 
   hoja_(HOJAS.FICHAJES).appendRow([
@@ -1128,4 +1189,557 @@ function notarNovedad_(datos) {
     return { ok: true };
   }
   return { ok: false, error: 'Novedad no encontrada.' };
+}
+
+// ===========================
+// ============ ADMIN ========
+// ===========================
+
+function esAdmin_(nombre) {
+  if (!nombre) return false;
+  const todos = filas_(HOJAS.OPERADORES);
+  const op = todos.find(o => String(o.Nombre || '').trim().toLowerCase() === String(nombre).trim().toLowerCase());
+  if (!op) return false;
+  const tipo = String(op.Tipo || '').toLowerCase();
+  const rol  = String(op.Rol  || '').toLowerCase();
+  return tipo.indexOf('admin') !== -1 || rol.indexOf('admin') !== -1;
+}
+
+function adminGuard_(datos, fn) {
+  if (!esAdmin_(datos.nombre)) return { ok: false, error: 'Acceso denegado: requiere rol admin.' };
+  return fn(datos);
+}
+
+function loginAdmin_(datos) {
+  const todos = filas_(HOJAS.OPERADORES);
+  const nombre = String(datos.nombre || '').trim().toLowerCase();
+  const op = todos.find(o => String(o.Nombre || '').trim().toLowerCase() === nombre);
+  if (!op) return { ok: false, error: 'Operador no encontrado.' };
+  if (String(op.PIN) !== String(datos.pin)) return { ok: false, error: 'PIN incorrecto.' };
+  if (!esAdmin_(op.Nombre)) return { ok: false, error: 'No tenés permisos de administrador.' };
+  return {
+    ok: true,
+    admin: { nombre: op.Nombre, tipo: op.Tipo, pc: op.PC, turno: op.Turno }
+  };
+}
+
+// --- DASHBOARD ---
+
+function getDashboard_() {
+  const ahora = new Date();
+  const pcsResp = getPCs_();
+  const pcs = pcsResp.pcs || [];
+
+  // Última acción por operador en FICHAJES
+  const fichajes = hoja_(HOJAS.FICHAJES).getDataRange().getValues();
+  const ultimosPorOp = {};
+  for (let i = 3; i < fichajes.length; i++) {
+    const ts = fichajes[i][0];
+    const nombre = fichajes[i][2];
+    if (!nombre || !ts) continue;
+    const key = String(nombre).trim().toLowerCase();
+    if (!ultimosPorOp[key] || ts > ultimosPorOp[key].ts) {
+      ultimosPorOp[key] = {
+        ts, nombre,
+        turno: fichajes[i][3], pc: fichajes[i][4], tipo: fichajes[i][5],
+        accion: fichajes[i][6], hora: fichajes[i][7]
+      };
+    }
+  }
+
+  // PCs activas: agrupar operadores con Ingreso vigente
+  const pcsActivas = {};
+  for (const k in ultimosPorOp) {
+    const u = ultimosPorOp[k];
+    if (u.accion === 'Ingreso') {
+      const pcKey = String(u.pc || '').trim().toUpperCase();
+      if (!pcsActivas[pcKey]) pcsActivas[pcKey] = [];
+      pcsActivas[pcKey].push({
+        nombre: u.nombre,
+        turno: u.turno,
+        desde: u.hora,
+        minutosSesion: u.ts instanceof Date ? Math.max(0, Math.floor((ahora - u.ts) / 60000)) : 0
+      });
+    }
+  }
+
+  // Pausas abiertas por PC
+  const pausasAbiertas = {};
+  ['BANOS', 'FUMAR', 'LIMPIEZA'].forEach(k => {
+    let sh; try { sh = hoja_(HOJAS[k]); } catch (e) { return; }
+    const v = sh.getDataRange().getValues();
+    for (let i = 3; i < v.length; i++) {
+      if (v[i][9] !== 'Abierta') continue;
+      const pcKey = String(v[i][4] || '').trim().toUpperCase();
+      if (!pausasAbiertas[pcKey]) pausasAbiertas[pcKey] = [];
+      pausasAbiertas[pcKey].push({
+        operador: v[i][2],
+        tipo: k.toLowerCase(),
+        desde: v[i][5],
+        minutos: v[i][0] instanceof Date ? Math.max(0, Math.floor((ahora - v[i][0]) / 60000)) : 0
+      });
+    }
+  });
+
+  // Conteos por PC
+  const novedadesPorPC = {};
+  const novV = hoja_(HOJAS.NOVEDADES).getDataRange().getValues();
+  for (let i = 3; i < novV.length; i++) {
+    const estado = String(novV[i][11] || '').toLowerCase();
+    if (estado !== 'pendiente' && estado !== 'en seguimiento') continue;
+    const pcKey = String(novV[i][4] || '').trim().toUpperCase();
+    novedadesPorPC[pcKey] = (novedadesPorPC[pcKey] || 0) + 1;
+  }
+
+  const tareasPorPC = {};
+  try {
+    const tSh = inicializarTareasPC_();
+    const tV = tSh.getDataRange().getValues();
+    for (let i = 3; i < tV.length; i++) {
+      const estado = String(tV[i][4] || '').toLowerCase();
+      if (estado === 'completada') continue;
+      if (!tV[i][3]) continue;
+      const pcKey = String(tV[i][2] || '').trim().toUpperCase();
+      tareasPorPC[pcKey] = (tareasPorPC[pcKey] || 0) + 1;
+    }
+  } catch (e) {}
+
+  // Teléfonos caídos por PC desde el log
+  const telCaidosPorPC = {};
+  try {
+    const shTel = hoja_(HOJAS.TELEFONOS);
+    const lastRow = shTel.getLastRow();
+    if (lastRow >= 4) {
+      const logRange = shTel.getRange(4, 8, lastRow - 3, 10).getValues();
+      for (let i = 0; i < logRange.length; i++) {
+        if (logRange[i][9] !== 'Abierta') continue;
+        const pcKey = String(logRange[i][1] || '').trim().toUpperCase();
+        telCaidosPorPC[pcKey] = (telCaidosPorPC[pcKey] || 0) + 1;
+      }
+    }
+  } catch (e) {}
+
+  const result = pcs.map(p => {
+    const pcKey = String(p.pc || '').trim().toUpperCase();
+    return {
+      pc: p.pc,
+      orden: p.orden,
+      operadores:        pcsActivas[pcKey] || [],
+      pausasAbiertas:    pausasAbiertas[pcKey] || [],
+      novedadesPendientes: novedadesPorPC[pcKey] || 0,
+      tareasPendientes:    tareasPorPC[pcKey] || 0,
+      telefonosCaidos:     telCaidosPorPC[pcKey] || 0
+    };
+  });
+
+  return { ok: true, pcs: result, ahora: hora_(ahora), fecha: fecha_(ahora) };
+}
+
+// --- OPERADORES CRUD ---
+
+function getOperadoresAdmin_(_datos) {
+  const ops = filas_(HOJAS.OPERADORES);
+  return { ok: true, operadores: ops };
+}
+
+function _filaOperador_(nombre) {
+  const sh = hoja_(HOJAS.OPERADORES);
+  const v = sh.getDataRange().getValues();
+  const headers = v[2];
+  const idxNombre = headers.findIndex(h => String(h).trim().toLowerCase() === 'nombre');
+  if (idxNombre === -1) return null;
+  for (let i = 3; i < v.length; i++) {
+    if (String(v[i][idxNombre] || '').trim().toLowerCase() === String(nombre || '').trim().toLowerCase()) {
+      return { sh, fila: i + 1, headers };
+    }
+  }
+  return null;
+}
+
+function crearOperador_(datos) {
+  if (!datos.nombre) return { ok: false, error: 'Falta nombre.' };
+  if (_filaOperador_(datos.nombre)) return { ok: false, error: 'Ya existe un operador con ese nombre.' };
+
+  const sh = hoja_(HOJAS.OPERADORES);
+  const headers = sh.getDataRange().getValues()[2];
+  const row = headers.map(h => {
+    const k = String(h).trim().toLowerCase();
+    if (k === 'nombre') return datos.nombre;
+    if (k === 'pin') return datos.pin || '';
+    if (k === 'turno') return datos.turno || '';
+    if (k === 'pc') return datos.pc || '';
+    if (k === 'tipo') return datos.tipo || 'Fijo';
+    if (k === 'rol') return datos.rol || '';
+    if (k === 'activo') return 'Sí';
+    return '';
+  });
+  sh.appendRow(row);
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+function editarOperador_(datos) {
+  const ref = _filaOperador_(datos.nombreOriginal || datos.nombre);
+  if (!ref) return { ok: false, error: 'Operador no encontrado.' };
+
+  const map = { nombre: datos.nombre, pin: datos.pin, turno: datos.turno, pc: datos.pc, tipo: datos.tipo, rol: datos.rol };
+  for (const key in map) {
+    if (map[key] === undefined || map[key] === '') continue;
+    const idx = ref.headers.findIndex(h => String(h).trim().toLowerCase() === key);
+    if (idx === -1) continue;
+    ref.sh.getRange(ref.fila, idx + 1).setValue(map[key]);
+  }
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+function eliminarOperador_(datos) {
+  const ref = _filaOperador_(datos.nombre);
+  if (!ref) return { ok: false, error: 'Operador no encontrado.' };
+  ref.sh.deleteRow(ref.fila);
+  return { ok: true };
+}
+
+function setActivoOperador_(datos) {
+  const ref = _filaOperador_(datos.nombre);
+  if (!ref) return { ok: false, error: 'Operador no encontrado.' };
+  const idx = ref.headers.findIndex(h => String(h).trim().toLowerCase() === 'activo');
+  if (idx === -1) return { ok: false, error: 'No existe columna Activo.' };
+  const val = (datos.activo === true || String(datos.activo).toLowerCase() === 'true' || datos.activo === 'Sí') ? 'Sí' : 'No';
+  ref.sh.getRange(ref.fila, idx + 1).setValue(val);
+  SpreadsheetApp.flush();
+  return { ok: true, activo: val };
+}
+
+function setPinOperador_(datos) {
+  const ref = _filaOperador_(datos.nombre);
+  if (!ref) return { ok: false, error: 'Operador no encontrado.' };
+  const idx = ref.headers.findIndex(h => String(h).trim().toLowerCase() === 'pin');
+  if (idx === -1) return { ok: false, error: 'No existe columna PIN.' };
+  if (!datos.pinNuevo) return { ok: false, error: 'PIN nuevo vacío.' };
+  ref.sh.getRange(ref.fila, idx + 1).setValue(datos.pinNuevo);
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+// --- TELÉFONOS CRUD ---
+
+function getTelefonosAdmin_(_datos) {
+  // Solo cols A-F (lista de teléfonos, no log)
+  const sh = hoja_(HOJAS.TELEFONOS);
+  const v = sh.getDataRange().getValues();
+  const out = [];
+  for (let i = 3; i < v.length; i++) {
+    if (!v[i][0]) continue;
+    out.push({
+      fila: i + 1,
+      linea: v[i][0],
+      tipo: v[i][1],
+      pc: v[i][2],
+      estadoEsperado: v[i][3],
+      activoEnSistema: v[i][4],
+      numero: v[i][5]
+    });
+  }
+  return { ok: true, telefonos: out };
+}
+
+function _filaTelefono_(linea, pc) {
+  const sh = hoja_(HOJAS.TELEFONOS);
+  const v = sh.getDataRange().getValues();
+  for (let i = 3; i < v.length; i++) {
+    if (String(v[i][0] || '').trim().toLowerCase() === String(linea || '').trim().toLowerCase()
+        && String(v[i][2] || '').trim().toLowerCase() === String(pc || '').trim().toLowerCase()) {
+      return { sh, fila: i + 1 };
+    }
+  }
+  return null;
+}
+
+function crearTelefono_(datos) {
+  if (!datos.linea || !datos.pc) return { ok: false, error: 'Falta línea o PC.' };
+  if (_filaTelefono_(datos.linea, datos.pc)) return { ok: false, error: 'Ya existe ese teléfono en esa PC.' };
+  const sh = hoja_(HOJAS.TELEFONOS);
+  // Insertar nueva fila después de la última fila de teléfono (no tocar el log)
+  // Estrategia: encontrar la última fila con dato en col A (entre 4 y getLastRow)
+  const lastRow = sh.getLastRow();
+  let ultimaFilaTel = 3;
+  for (let i = 4; i <= lastRow; i++) {
+    if (sh.getRange(i, 1).getValue()) ultimaFilaTel = i;
+  }
+  const insertRow = ultimaFilaTel + 1;
+  sh.insertRowBefore(insertRow);
+  sh.getRange(insertRow, 1, 1, 6).setValues([[
+    datos.linea, datos.tipo || 'Principal', datos.pc,
+    datos.estadoEsperado || 'Activo', datos.activoEnSistema || 'Sí', datos.numero || ''
+  ]]);
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+function editarTelefono_(datos) {
+  const ref = _filaTelefono_(datos.lineaOriginal || datos.linea, datos.pcOriginal || datos.pc);
+  if (!ref) return { ok: false, error: 'Teléfono no encontrado.' };
+  const updates = [datos.linea, datos.tipo, datos.pc, datos.estadoEsperado, datos.activoEnSistema, datos.numero];
+  updates.forEach((v, idx) => {
+    if (v !== undefined && v !== '') ref.sh.getRange(ref.fila, idx + 1).setValue(v);
+  });
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+function eliminarTelefono_(datos) {
+  const ref = _filaTelefono_(datos.linea, datos.pc);
+  if (!ref) return { ok: false, error: 'Teléfono no encontrado.' };
+  // No deleteRow porque puede haber log en cols H+. Limpiar A-F solamente.
+  ref.sh.getRange(ref.fila, 1, 1, 6).clearContent();
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+// --- TAREAS ADMIN ---
+
+function getTareasAdmin_(datos) {
+  const sh = inicializarTareasPC_();
+  const v = sh.getDataRange().getValues();
+  const out = [];
+  for (let i = 3; i < v.length; i++) {
+    if (!v[i][3]) continue;
+    out.push({
+      fila: i + 1,
+      timestamp: v[i][0], fecha: v[i][1], pc: v[i][2],
+      tarea: v[i][3], estado: v[i][4],
+      fechaCompletada: v[i][5], completoPor: v[i][6]
+    });
+  }
+  return { ok: true, tareas: out };
+}
+
+function crearTarea_(datos) {
+  if (!datos.pc || !datos.tareaTexto) return { ok: false, error: 'Falta PC o texto de tarea.' };
+  const sh = inicializarTareasPC_();
+  const ahora = new Date();
+  sh.appendRow([
+    new Date(), fecha_(ahora), datos.pc, datos.tareaTexto, 'Pendiente', '', ''
+  ]);
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+function eliminarTareaAdmin_(datos) {
+  const fila = parseInt(datos.fila || datos.tareaId || '0');
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  const sh = inicializarTareasPC_();
+  sh.deleteRow(fila);
+  return { ok: true };
+}
+
+// --- NOVEDADES ADMIN ---
+
+function getNovedadesAdmin_(datos) {
+  const sh = hoja_(HOJAS.NOVEDADES);
+  const v = sh.getDataRange().getValues();
+  const pcF    = String(datos.pc || '').trim().toLowerCase();
+  const estF   = String(datos.estado || '').trim().toLowerCase();
+  const limit  = datos.limit || 200;
+  const out = [];
+  for (let i = v.length - 1; i >= 3; i--) {
+    if (!v[i][10]) continue;
+    const pcN = String(v[i][4] || '').trim().toLowerCase();
+    const eN  = String(v[i][11] || '').trim().toLowerCase();
+    if (pcF && pcN !== pcF) continue;
+    if (estF && eN !== estF) continue;
+    out.push({
+      fila: i + 1,
+      timestamp: v[i][0], fecha: v[i][1], operador: v[i][2], turno: v[i][3], pc: v[i][4],
+      tipo: v[i][5], prioridad: v[i][6], detalle: v[i][7], resuelto: v[i][8],
+      observaciones: v[i][9], id: v[i][10], estado: v[i][11], revisadoPor: v[i][12], resolucion: v[i][13]
+    });
+    if (out.length >= limit) break;
+  }
+  return { ok: true, cantidad: out.length, novedades: out };
+}
+
+function eliminarNovedad_(datos) {
+  const idBuscado = String(datos.id || '').trim();
+  if (!idBuscado) return { ok: false, error: 'Falta ID.' };
+  const sh = hoja_(HOJAS.NOVEDADES);
+  const v = sh.getDataRange().getValues();
+  for (let i = 3; i < v.length; i++) {
+    if (String(v[i][10] || '').trim() === idBuscado) {
+      sh.deleteRow(i + 1);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'Novedad no encontrada.' };
+}
+
+// --- PCs CRUD ---
+
+function getPCsAdmin_(_datos) {
+  const filas = filas_(HOJAS.PCS);
+  return { ok: true, pcs: filas };
+}
+
+function _filaPC_(pc) {
+  const sh = hoja_(HOJAS.PCS);
+  const v = sh.getDataRange().getValues();
+  for (let i = 3; i < v.length; i++) {
+    if (String(v[i][0] || '').trim().toLowerCase() === String(pc || '').trim().toLowerCase()) {
+      return { sh, fila: i + 1, headers: v[2] };
+    }
+  }
+  return null;
+}
+
+function crearPC_(datos) {
+  if (!datos.pc) return { ok: false, error: 'Falta nombre de PC.' };
+  if (_filaPC_(datos.pc)) return { ok: false, error: 'Ya existe esa PC.' };
+  const sh = hoja_(HOJAS.PCS);
+  const headers = sh.getDataRange().getValues()[2] || [];
+  const row = headers.map(h => {
+    const k = String(h).trim().toLowerCase();
+    if (k === 'pc') return datos.pc;
+    if (k.indexOf('orden') !== -1) return datos.orden || 999;
+    if (k === 'estado') return datos.estadoPC || 'Activa';
+    return '';
+  });
+  if (!row.length) sh.appendRow([datos.pc, datos.orden || 999, datos.estadoPC || 'Activa']);
+  else sh.appendRow(row);
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+function editarPC_(datos) {
+  const ref = _filaPC_(datos.pcOriginal || datos.pc);
+  if (!ref) return { ok: false, error: 'PC no encontrada.' };
+  const map = { pc: datos.pc, orden: datos.orden, estado: datos.estadoPC };
+  ref.headers.forEach((h, idx) => {
+    const k = String(h).trim().toLowerCase();
+    if (k === 'pc' && map.pc) ref.sh.getRange(ref.fila, idx + 1).setValue(map.pc);
+    else if (k.indexOf('orden') !== -1 && map.orden) ref.sh.getRange(ref.fila, idx + 1).setValue(map.orden);
+    else if (k === 'estado' && map.estado) ref.sh.getRange(ref.fila, idx + 1).setValue(map.estado);
+  });
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+function eliminarPC_(datos) {
+  const ref = _filaPC_(datos.pc);
+  if (!ref) return { ok: false, error: 'PC no encontrada.' };
+  ref.sh.deleteRow(ref.fila);
+  return { ok: true };
+}
+
+// --- HISTÓRICO ---
+
+function _enRango_(ts, desdeStr, hastaStr) {
+  if (!(ts instanceof Date)) return true;
+  if (desdeStr) {
+    const d = new Date(desdeStr); if (!isNaN(d) && ts < d) return false;
+  }
+  if (hastaStr) {
+    const h = new Date(hastaStr); if (!isNaN(h)) { h.setHours(23,59,59,999); if (ts > h) return false; }
+  }
+  return true;
+}
+
+function getFichajes_(datos) {
+  const sh = hoja_(HOJAS.FICHAJES);
+  const v = sh.getDataRange().getValues();
+  const opF = String(datos.operador || '').trim().toLowerCase();
+  const limit = datos.limit || 200;
+  const out = [];
+  for (let i = v.length - 1; i >= 3; i--) {
+    if (!v[i][2]) continue;
+    if (!_enRango_(v[i][0], datos.desde, datos.hasta)) continue;
+    if (opF && String(v[i][2]).trim().toLowerCase() !== opF) continue;
+    out.push({
+      timestamp: v[i][0], fecha: v[i][1], nombre: v[i][2], turno: v[i][3], pc: v[i][4],
+      tipo: v[i][5], accion: v[i][6], hora: v[i][7], estado: v[i][8],
+      minutosTarde: v[i][9], observaciones: v[i][10]
+    });
+    if (out.length >= limit) break;
+  }
+  return { ok: true, cantidad: out.length, fichajes: out };
+}
+
+function getPausasAdmin_(datos) {
+  const tipos = { bano: HOJAS.BANOS, fumar: HOJAS.FUMAR, limpieza: HOJAS.LIMPIEZA };
+  const tipoF = String(datos.tipoPausa || '').toLowerCase();
+  const opF = String(datos.operador || '').trim().toLowerCase();
+  const pcF = String(datos.pc || '').trim().toLowerCase();
+  const limit = datos.limit || 200;
+  const out = [];
+
+  for (const k in tipos) {
+    if (tipoF && k !== tipoF) continue;
+    let sh; try { sh = hoja_(tipos[k]); } catch(e) { continue; }
+    const v = sh.getDataRange().getValues();
+    for (let i = v.length - 1; i >= 3; i--) {
+      if (!v[i][2]) continue;
+      if (!_enRango_(v[i][0], datos.desde, datos.hasta)) continue;
+      if (opF && String(v[i][2]).trim().toLowerCase() !== opF) continue;
+      if (pcF && String(v[i][4] || '').trim().toLowerCase() !== pcF) continue;
+      out.push({
+        tipoPausa: k,
+        timestamp: v[i][0], fecha: v[i][1], operador: v[i][2], turno: v[i][3], pc: v[i][4],
+        horaSalida: v[i][5], horaRegreso: v[i][6], minutos: v[i][7], excedio: v[i][8],
+        estado: v[i][9], observaciones: v[i][10]
+      });
+      if (out.length >= limit) break;
+    }
+    if (out.length >= limit) break;
+  }
+  // Ordenar por timestamp desc
+  out.sort((a, b) => (b.timestamp instanceof Date ? b.timestamp.getTime() : 0) - (a.timestamp instanceof Date ? a.timestamp.getTime() : 0));
+  return { ok: true, cantidad: out.length, pausas: out };
+}
+
+function getRecepciones_(datos) {
+  const sh = hoja_(HOJAS.RECEPCION);
+  const v = sh.getDataRange().getValues();
+  const pcF = String(datos.pc || '').trim().toLowerCase();
+  const limit = datos.limit || 200;
+  const out = [];
+  for (let i = v.length - 1; i >= 3; i--) {
+    if (!v[i][4]) continue;
+    if (!_enRango_(v[i][0], datos.desde, datos.hasta)) continue;
+    if (pcF && String(v[i][3] || '').trim().toLowerCase() !== pcF) continue;
+    out.push({
+      timestamp: v[i][0], fecha: v[i][1], turno: v[i][2], pc: v[i][3],
+      recibe: v[i][4], entrega: v[i][5], puestoOrden: v[i][6], whatsappOk: v[i][7],
+      cajaOk: v[i][8], diferenciaCaja: v[i][9], revinculacionOk: v[i][10],
+      telefonosCaidos: v[i][11], limpieza: v[i][12], observaciones: v[i][13]
+    });
+    if (out.length >= limit) break;
+  }
+  return { ok: true, cantidad: out.length, recepciones: out };
+}
+
+function getLogTelefonosAdmin_(datos) {
+  const sh = hoja_(HOJAS.TELEFONOS);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 4) return { ok: true, log: [] };
+
+  const logRange = sh.getRange(4, 8, lastRow - 3, 10).getValues();
+  const pcF = String(datos.pc || '').trim().toLowerCase();
+  const lineaF = String(datos.linea || '').trim().toLowerCase();
+  const limit = datos.limit || 200;
+  const log = [];
+
+  for (let i = logRange.length - 1; i >= 0; i--) {
+    if (!logRange[i][0]) continue;
+    if (pcF && String(logRange[i][1] || '').trim().toLowerCase() !== pcF) continue;
+    if (lineaF && String(logRange[i][2] || '').trim().toLowerCase() !== lineaF) continue;
+    if (!_enRango_(logRange[i][0], datos.desde, datos.hasta)) continue;
+    log.push({
+      timestamp: logRange[i][0], pc: logRange[i][1], linea: logRange[i][2],
+      horaCaida: logRange[i][3], operadorCaida: logRange[i][4], motivo: logRange[i][5],
+      horaLevantado: logRange[i][6], duracion: logRange[i][7],
+      operadorLevanta: logRange[i][8], estado: logRange[i][9]
+    });
+    if (log.length >= limit) break;
+  }
+  return { ok: true, cantidad: log.length, log };
 }

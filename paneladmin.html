@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CTRL PRO - Panel Admin</title>
+<style>
+  * { box-sizing: border-box; font-family: Arial, sans-serif; }
+  body { margin:0; background:#0d0d0d; color:#fff; }
+  .hidden { display:none !important; }
+
+  /* LOGIN */
+  .login-wrap { max-width: 380px; margin: 100px auto; padding: 30px;
+    background:#1a1a1a; border-radius:14px; box-shadow:0 4px 14px rgba(0,0,0,.4); }
+  .login-wrap h1 { margin:0 0 6px; }
+  .login-wrap h3 { margin:0 0 18px; color:#aaa; font-weight:400; }
+  input, select, textarea, button {
+    width:100%; padding:11px; margin:5px 0 10px;
+    border-radius:8px; border:none; font-size:14px;
+  }
+  input, select, textarea { background:#fff; color:#111; }
+  textarea { resize: vertical; min-height: 60px; }
+  button { background:#3a4bdd; color:#fff; cursor:pointer; font-weight:500; }
+  button:hover { background:#4d5ee5; }
+  button.secondary { background:#444; }
+  button.danger { background:#d93025; }
+  button.warning { background:#f0b429; color:#111; }
+  button.success { background:#16a765; }
+  button.btn-sm { padding:6px 12px; font-size:12px; width:auto; margin:2px; }
+  .msg { color:#f88; font-size:13px; margin-top:6px; min-height:18px; }
+  .msg.ok { color:#7c7; }
+
+  /* APP */
+  .app { display:flex; min-height:100vh; }
+  aside { width:220px; background:#1a1a1a; padding:20px 0; flex-shrink:0; }
+  aside .brand { padding:0 20px 20px; border-bottom:1px solid #2a2a2a; }
+  aside .brand h2 { margin:0; font-size:18px; }
+  aside .brand .who { font-size:12px; color:#888; margin-top:4px; }
+  aside nav { padding:14px 0; }
+  aside nav button {
+    display:block; width:100%; text-align:left;
+    background:transparent; padding:11px 20px; border-radius:0;
+    border-left:3px solid transparent; color:#bbb; margin:0; font-size:14px;
+  }
+  aside nav button:hover { background:#222; color:#fff; }
+  aside nav button.active { border-left-color:#3a4bdd; color:#fff; background:#222; }
+  aside .logout-btn { margin: 20px; padding: 9px 12px; }
+
+  main { flex:1; padding:24px 32px; overflow-x:auto; }
+  .section { display:none; }
+  .section.active { display:block; }
+
+  h2.section-title { margin:0 0 18px; font-size:22px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .row > * { margin:0; }
+  .filter-bar { background:#1a1a1a; padding:14px; border-radius:10px; margin-bottom:18px; }
+  .filter-bar .row { gap:10px; }
+  .filter-bar input, .filter-bar select { width:auto; min-width:140px; max-width:240px; }
+
+  .grid { display:grid; gap:14px; }
+  .grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+  .grid.cols-3 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+  .card { background:#1a1a1a; padding:16px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,.3); }
+  .card h3 { margin:0 0 12px; font-size:16px; }
+  .pc-card { padding:16px; border-radius:12px; background:#1a1a1a; cursor:pointer;
+    border-left:4px solid #3a4bdd; transition: transform .1s; }
+  .pc-card:hover { transform: translateY(-2px); }
+  .pc-card .pc-name { font-size:18px; font-weight:bold; }
+  .pc-card .pc-status { color:#7c7; font-size:13px; margin-top:4px; }
+  .pc-card .pc-status.empty { color:#f88; }
+  .pc-card .pc-stats { display:flex; gap:14px; margin-top:10px; font-size:12px; }
+  .pc-card .pc-stat { background:#2a2a2a; padding:5px 9px; border-radius:6px; }
+  .pc-card .pc-stat.alert { background:#3d2020; color:#f88; }
+  .pc-card .pc-pausa { font-size:12px; color:#fab; margin-top:4px; }
+
+  table { width:100%; border-collapse:collapse; background:#1a1a1a; border-radius:8px; overflow:hidden; }
+  th, td { padding:10px 12px; text-align:left; border-bottom:1px solid #2a2a2a; font-size:13px; }
+  th { background:#222; color:#bbb; font-weight:500; font-size:12px; text-transform:uppercase; }
+  tr:last-child td { border-bottom:none; }
+  tr.inactive td { color:#666; font-style:italic; }
+  td.actions { white-space:nowrap; text-align:right; }
+  td input, td select { padding:6px 8px; font-size:13px; margin:0; }
+
+  .badge { display:inline-block; padding:3px 8px; border-radius:99px; font-size:11px; font-weight:bold; }
+  .badge.green { background:#173321; color:#7c7; }
+  .badge.red { background:#3d2020; color:#f88; }
+  .badge.yellow { background:#3d3220; color:#f0b429; }
+  .badge.blue { background:#1d2540; color:#88a8f0; }
+  .badge.gray { background:#2a2a2a; color:#aaa; }
+
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.7); display:flex; align-items:center; justify-content:center; z-index:100; }
+  .modal { background:#1f1f1f; padding:24px; border-radius:12px; max-width:500px; width:90%; max-height:80vh; overflow-y:auto; }
+  .modal h3 { margin:0 0 14px; }
+  .modal .row-buttons { display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
+  .modal .row-buttons button { width:auto; padding:8px 16px; }
+
+  label { display:block; font-size:12px; color:#aaa; margin:8px 0 2px; }
+
+  .empty-state { padding:30px; text-align:center; color:#888; background:#1a1a1a; border-radius:10px; }
+  .stat { display:inline-block; margin-right:14px; }
+  .stat .stat-num { font-size:24px; font-weight:bold; }
+  .stat .stat-label { font-size:11px; color:#aaa; text-transform:uppercase; }
+
+  .top-actions { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginCard" class="login-wrap">
+  <h1>CTRL PRO</h1>
+  <h3>Panel de administración</h3>
+  <label>Usuario admin</label>
+  <input id="loginNombre" placeholder="Nombre" />
+  <label>PIN</label>
+  <input id="loginPin" type="password" placeholder="PIN" />
+  <button onclick="loginAdmin()">Ingresar</button>
+  <div id="loginMsg" class="msg"></div>
+</div>
+
+<!-- APP -->
+<div id="adminApp" class="app hidden">
+  <aside>
+    <div class="brand">
+      <h2>⚙️ CTRL Admin</h2>
+      <div class="who" id="adminWho"></div>
+    </div>
+    <nav>
+      <button data-section="dashboard" class="active" onclick="cambiarSeccion('dashboard')">📊 Dashboard</button>
+      <button data-section="pcs"        onclick="cambiarSeccion('pcs')">🖥️ PCs</button>
+      <button data-section="operadores" onclick="cambiarSeccion('operadores')">👤 Operadores</button>
+      <button data-section="telefonos"  onclick="cambiarSeccion('telefonos')">📞 Teléfonos</button>
+      <button data-section="tareas"     onclick="cambiarSeccion('tareas')">⚡ Tareas</button>
+      <button data-section="novedades"  onclick="cambiarSeccion('novedades')">⚠️ Novedades</button>
+      <button data-section="historial"  onclick="cambiarSeccion('historial')">📋 Histórico</button>
+    </nav>
+    <button class="secondary logout-btn" onclick="logoutAdmin()">Cerrar sesión</button>
+  </aside>
+
+  <main>
+    <!-- DASHBOARD -->
+    <section id="section-dashboard" class="section active">
+      <div class="top-actions">
+        <h2 class="section-title">📊 Dashboard general</h2>
+        <button class="secondary btn-sm" onclick="cargarDashboard()">🔄 Refrescar</button>
+      </div>
+      <div id="dashboardBox"></div>
+    </section>
+
+    <!-- PCs -->
+    <section id="section-pcs" class="section">
+      <div class="top-actions">
+        <h2 class="section-title">🖥️ PCs</h2>
+        <button onclick="modalNuevaPC()">+ Nueva PC</button>
+      </div>
+      <div id="pcsBox"></div>
+    </section>
+
+    <!-- OPERADORES -->
+    <section id="section-operadores" class="section">
+      <div class="top-actions">
+        <h2 class="section-title">👤 Operadores</h2>
+        <button onclick="modalNuevoOperador()">+ Nuevo operador</button>
+      </div>
+      <div class="filter-bar">
+        <div class="row">
+          <input id="filterOpNombre" placeholder="Buscar por nombre" oninput="renderOperadores()" />
+          <select id="filterOpActivo" onchange="renderOperadores()">
+            <option value="">Activo: todos</option>
+            <option value="si">Activos</option>
+            <option value="no">Inactivos</option>
+          </select>
+          <select id="filterOpPC" onchange="renderOperadores()"><option value="">PC: todas</option></select>
+        </div>
+      </div>
+      <div id="operadoresBox"></div>
+    </section>
+
+    <!-- TELÉFONOS -->
+    <section id="section-telefonos" class="section">
+      <div class="top-actions">
+        <h2 class="section-title">📞 Teléfonos</h2>
+        <button onclick="modalNuevoTelefono()">+ Nuevo teléfono</button>
+      </div>
+      <div class="filter-bar">
+        <div class="row">
+          <input id="filterTelLinea" placeholder="Buscar línea" oninput="renderTelefonos()" />
+          <select id="filterTelPC" onchange="renderTelefonos()"><option value="">PC: todas</option></select>
+          <select id="filterTelTipo" onchange="renderTelefonos()">
+            <option value="">Tipo: todos</option><option>Principal</option><option>Soporte</option>
+          </select>
+        </div>
+      </div>
+      <div id="telefonosBox"></div>
+    </section>
+
+    <!-- TAREAS -->
+    <section id="section-tareas" class="section">
+      <div class="top-actions">
+        <h2 class="section-title">⚡ Tareas asignadas</h2>
+        <button onclick="modalNuevaTarea()">+ Nueva tarea</button>
+      </div>
+      <div class="filter-bar">
+        <div class="row">
+          <select id="filterTareaPC" onchange="renderTareas()"><option value="">PC: todas</option></select>
+          <select id="filterTareaEstado" onchange="renderTareas()">
+            <option value="">Estado: todos</option>
+            <option value="pendiente">Pendiente</option>
+            <option value="completada">Completada</option>
+          </select>
+        </div>
+      </div>
+      <div id="tareasBox"></div>
+    </section>
+
+    <!-- NOVEDADES -->
+    <section id="section-novedades" class="section">
+      <h2 class="section-title">⚠️ Novedades</h2>
+      <div class="filter-bar">
+        <div class="row">
+          <select id="filterNovPC" onchange="cargarNovedades()"><option value="">PC: todas</option></select>
+          <select id="filterNovEstado" onchange="cargarNovedades()">
+            <option value="">Estado: todos</option>
+            <option value="pendiente">Pendiente</option>
+            <option value="en seguimiento">En seguimiento</option>
+            <option value="resuelta">Resuelta</option>
+          </select>
+        </div>
+      </div>
+      <div id="novedadesBox"></div>
+    </section>
+
+    <!-- HISTÓRICO -->
+    <section id="section-historial" class="section">
+      <h2 class="section-title">📋 Histórico</h2>
+      <div class="filter-bar">
+        <div class="row">
+          <select id="filterHistTipo" onchange="cargarHistorial()">
+            <option value="fichajes">Fichajes</option>
+            <option value="pausas">Pausas</option>
+            <option value="recepciones">Recepciones</option>
+            <option value="logtelefonos">Log de teléfonos</option>
+          </select>
+          <input id="filterHistDesde" type="date" onchange="cargarHistorial()" />
+          <input id="filterHistHasta" type="date" onchange="cargarHistorial()" />
+          <select id="filterHistPC" onchange="cargarHistorial()"><option value="">PC: todas</option></select>
+          <input id="filterHistOperador" placeholder="Operador" onchange="cargarHistorial()" />
+        </div>
+      </div>
+      <div id="historialBox"></div>
+    </section>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+const API_URL = "https://script.google.com/macros/s/AKfycbyRaRvPoOZRStLWkfI-RECpYZ_6D72QTaqf_iAsZOdfmYWrwW-5fXlYDzJ5AkpUfjMr/exec";
+
+let admin = null;
+let _operadoresCache = [];
+let _telefonosCache = [];
+let _pcsCache = [];
+
+const escape = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => (
+  {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]
+));
+
+async function api(params) {
+  const url = API_URL + "?" + new URLSearchParams({ ...params, nombre: params.nombre || (admin ? admin.nombre : ""), _t: Date.now() }).toString();
+  try {
+    const r = await fetch(url, { method: "GET" });
+    return await r.json();
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function setMsg(id, msg, ok) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg || "";
+  el.className = "msg" + (ok ? " ok" : "");
+}
+
+// =========== LOGIN ===========
+
+async function loginAdmin() {
+  const nombre = document.getElementById("loginNombre").value.trim();
+  const pin = document.getElementById("loginPin").value.trim();
+  if (!nombre || !pin) { setMsg("loginMsg", "Completá nombre y PIN."); return; }
+  setMsg("loginMsg", "Validando...");
+  const r = await api({ action: "loginadmin", nombre, pin });
+  if (!r.ok) { setMsg("loginMsg", r.error || "Error."); return; }
+  admin = r.admin;
+  localStorage.setItem("ctrlAdmin", JSON.stringify(admin));
+  mostrarApp();
+}
+
+function logoutAdmin() {
+  localStorage.removeItem("ctrlAdmin");
+  admin = null;
+  location.reload();
+}
+
+function mostrarApp() {
+  document.getElementById("loginCard").classList.add("hidden");
+  document.getElementById("adminApp").classList.remove("hidden");
+  document.getElementById("adminWho").textContent = admin.nombre;
+  cargarDashboard();
+  cargarPCsCache();
+}
+
+// =========== NAV ===========
+
+function cambiarSeccion(seccion) {
+  document.querySelectorAll("aside nav button").forEach(b => {
+    b.classList.toggle("active", b.dataset.section === seccion);
+  });
+  document.querySelectorAll(".section").forEach(s => {
+    s.classList.toggle("active", s.id === "section-" + seccion);
+  });
+  if (seccion === "dashboard") cargarDashboard();
+  if (seccion === "pcs") cargarPCs();
+  if (seccion === "operadores") cargarOperadores();
+  if (seccion === "telefonos") cargarTelefonos();
+  if (seccion === "tareas") cargarTareas();
+  if (seccion === "novedades") cargarNovedades();
+  if (seccion === "historial") cargarHistorial();
+}
+
+// =========== CACHE PCs (para selectores) ===========
+
+async function cargarPCsCache() {
+  const r = await api({ action: "getpcsadmin" });
+  if (!r.ok) return;
+  _pcsCache = r.pcs || [];
+  ["filterOpPC", "filterTelPC", "filterTareaPC", "filterNovPC", "filterHistPC"].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const current = sel.value;
+    sel.innerHTML = '<option value="">' + sel.options[0].text + '</option>';
+    _pcsCache.forEach(p => {
+      const opt = document.createElement("option");
+      opt.value = p.PC || "";
+      opt.textContent = p.PC || "";
+      sel.appendChild(opt);
+    });
+    sel.value = current;
+  });
+}
+
+// =========== DASHBOARD ===========
+
+async function cargarDashboard() {
+  const box = document.getElementById("dashboardBox");
+  box.innerHTML = '<div class="empty-state">Cargando...</div>';
+  const r = await api({ action: "getdashboard" });
+  if (!r.ok) { box.innerHTML = '<div class="empty-state">Error: ' + escape(r.error) + '</div>'; return; }
+
+  const totalOps = r.pcs.reduce((s, p) => s + p.operadores.length, 0);
+  const totalNov = r.pcs.reduce((s, p) => s + (p.novedadesPendientes || 0), 0);
+  const totalTar = r.pcs.reduce((s, p) => s + (p.tareasPendientes || 0), 0);
+  const totalCai = r.pcs.reduce((s, p) => s + (p.telefonosCaidos || 0), 0);
+
+  const stats = `
+    <div class="card" style="margin-bottom:14px">
+      <span class="stat"><div class="stat-num">${r.pcs.length}</div><div class="stat-label">PCs</div></span>
+      <span class="stat"><div class="stat-num">${totalOps}</div><div class="stat-label">Operadores activos</div></span>
+      <span class="stat"><div class="stat-num" style="color:${totalNov>0?'#f88':'#7c7'}">${totalNov}</div><div class="stat-label">Novedades pendientes</div></span>
+      <span class="stat"><div class="stat-num" style="color:${totalTar>0?'#f0b429':'#7c7'}">${totalTar}</div><div class="stat-label">Tareas pendientes</div></span>
+      <span class="stat"><div class="stat-num" style="color:${totalCai>0?'#f88':'#7c7'}">${totalCai}</div><div class="stat-label">Tel. caídos</div></span>
+      <span style="float:right;color:#888;font-size:13px;padding-top:14px">Última actualización: ${escape(r.fecha)} ${escape(r.ahora)}</span>
+    </div>`;
+
+  const cards = r.pcs.map(p => {
+    const ops = p.operadores.map(o =>
+      `<div>${escape(o.nombre)} <span class="badge gray">${escape(o.turno || "")}</span> · ${escape(o.desde || "")} (${o.minutosSesion} min)</div>`
+    ).join("");
+    const pausas = p.pausasAbiertas.map(pa =>
+      `<div class="pc-pausa">⏸️ ${escape(pa.operador)} en ${escape(pa.tipo)} (${pa.minutos} min)</div>`
+    ).join("");
+
+    return `
+      <div class="pc-card" style="border-left-color:${p.operadores.length?'#16a765':'#d93025'}">
+        <div class="pc-name">${escape(p.pc)}</div>
+        <div class="pc-status ${p.operadores.length?'':'empty'}">
+          ${p.operadores.length ? ops : "Sin operador"}
+        </div>
+        ${pausas}
+        <div class="pc-stats">
+          <span class="pc-stat ${p.novedadesPendientes>0?'alert':''}">⚠️ ${p.novedadesPendientes} novedad${p.novedadesPendientes!==1?'es':''}</span>
+          <span class="pc-stat ${p.tareasPendientes>0?'alert':''}">⚡ ${p.tareasPendientes} tarea${p.tareasPendientes!==1?'s':''}</span>
+          <span class="pc-stat ${p.telefonosCaidos>0?'alert':''}">📞 ${p.telefonosCaidos} caído${p.telefonosCaidos!==1?'s':''}</span>
+        </div>
+      </div>`;
+  }).join("");
+
+  box.innerHTML = stats + '<div class="grid cols-2">' + cards + '</div>';
+}
+
+// =========== PCs ===========
+
+async function cargarPCs() {
+  await cargarPCsCache();
+  const box = document.getElementById("pcsBox");
+  if (!_pcsCache.length) { box.innerHTML = '<div class="empty-state">No hay PCs configuradas.</div>'; return; }
+  box.innerHTML = `
+    <table>
+      <thead><tr><th>PC</th><th>Orden limpieza</th><th>Estado</th><th></th></tr></thead>
+      <tbody>${_pcsCache.map(p => `
+        <tr>
+          <td><b>${escape(p.PC || "")}</b></td>
+          <td>${escape(p['Orden rotación llmpieza'] || p['Orden rotación limpieza'] || p['Orden rotacion limpieza'] || '')}</td>
+          <td><span class="badge ${(p.Estado||'').toLowerCase()==='activa'?'green':'gray'}">${escape(p.Estado || '')}</span></td>
+          <td class="actions">
+            <button class="btn-sm secondary" onclick="modalEditarPC('${escape(p.PC)}')">Editar</button>
+            <button class="btn-sm danger" onclick="eliminarPC('${escape(p.PC)}')">Eliminar</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function modalNuevaPC() {
+  abrirModal({ titulo: "Nueva PC", campos: [
+    { id: "pc", label: "Nombre PC", placeholder: "Ej: NUEVA" },
+    { id: "orden", label: "Orden rotación limpieza", type: "number" },
+    { id: "estadoPC", label: "Estado", type: "select", opciones: ["Activa", "Inactiva"] }
+  ], onSave: async (vals) => {
+    const r = await api({ action: "crearpc", ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarPCs();
+  }});
+}
+
+function modalEditarPC(pc) {
+  const cur = _pcsCache.find(p => p.PC === pc) || {};
+  abrirModal({ titulo: "Editar PC: " + pc, campos: [
+    { id: "pc", label: "Nombre PC", value: cur.PC },
+    { id: "orden", label: "Orden", type: "number", value: cur['Orden rotación llmpieza'] || cur['Orden rotación limpieza'] || '' },
+    { id: "estadoPC", label: "Estado", type: "select", opciones: ["Activa", "Inactiva"], value: cur.Estado || "Activa" }
+  ], onSave: async (vals) => {
+    const r = await api({ action: "editarpc", pcOriginal: pc, ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarPCs();
+  }});
+}
+
+async function eliminarPC(pc) {
+  if (!confirm("¿Eliminar PC " + pc + "?")) return;
+  const r = await api({ action: "eliminarpc", pc });
+  if (!r.ok) return alert(r.error);
+  cargarPCs();
+}
+
+// =========== OPERADORES ===========
+
+async function cargarOperadores() {
+  const r = await api({ action: "getoperadoresadmin" });
+  if (!r.ok) return;
+  _operadoresCache = r.operadores || [];
+  renderOperadores();
+}
+
+function renderOperadores() {
+  const box = document.getElementById("operadoresBox");
+  const fNombre = (document.getElementById("filterOpNombre").value || "").toLowerCase();
+  const fActivo = document.getElementById("filterOpActivo").value;
+  const fPC = document.getElementById("filterOpPC").value;
+
+  const ops = _operadoresCache.filter(o => {
+    if (fNombre && !String(o.Nombre || "").toLowerCase().includes(fNombre)) return false;
+    const act = String(o.Activo || "").toLowerCase();
+    if (fActivo === "si" && act !== "sí" && act !== "si") return false;
+    if (fActivo === "no" && (act === "sí" || act === "si")) return false;
+    if (fPC && o.PC !== fPC) return false;
+    return true;
+  });
+
+  if (!ops.length) { box.innerHTML = '<div class="empty-state">Sin resultados.</div>'; return; }
+
+  box.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Nombre</th><th>PIN</th><th>Turno</th><th>PC</th><th>Tipo</th><th>Activo</th><th></th>
+      </tr></thead>
+      <tbody>${ops.map(o => {
+        const act = (String(o.Activo).toLowerCase() === "sí" || String(o.Activo).toLowerCase() === "si");
+        return `
+        <tr class="${act ? "" : "inactive"}">
+          <td><b>${escape(o.Nombre)}</b></td>
+          <td>••••</td>
+          <td>${escape(o.Turno || "")}</td>
+          <td>${escape(o.PC || "")}</td>
+          <td>${escape(o.Tipo || "")}</td>
+          <td><span class="badge ${act?'green':'red'}">${act?'Sí':'No'}</span></td>
+          <td class="actions">
+            <button class="btn-sm secondary" onclick="modalEditarOperador('${escape(o.Nombre)}')">Editar</button>
+            <button class="btn-sm warning" onclick="modalResetPin('${escape(o.Nombre)}')">PIN</button>
+            <button class="btn-sm ${act?'secondary':'success'}" onclick="toggleActivoOperador('${escape(o.Nombre)}', ${!act})">${act?'Desactivar':'Activar'}</button>
+            <button class="btn-sm danger" onclick="eliminarOperador('${escape(o.Nombre)}')">×</button>
+          </td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table>`;
+}
+
+function modalNuevoOperador() {
+  abrirModal({ titulo: "Nuevo operador", campos: [
+    { id: "nombre", label: "Nombre" },
+    { id: "pin", label: "PIN" },
+    { id: "turno", label: "Turno", type: "select", opciones: ["TM", "TT", "TN"] },
+    { id: "pc", label: "PC asignada" },
+    { id: "tipo", label: "Tipo", type: "select", opciones: ["Fijo", "Franquero", "Admin"] }
+  ], onSave: async (vals) => {
+    const r = await api({ action: "crearoperador", ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarOperadores();
+  }});
+}
+
+function modalEditarOperador(nombre) {
+  const o = _operadoresCache.find(x => x.Nombre === nombre);
+  if (!o) return;
+  abrirModal({ titulo: "Editar operador: " + nombre, campos: [
+    { id: "nombre", label: "Nombre", value: o.Nombre },
+    { id: "turno", label: "Turno", type: "select", opciones: ["TM", "TT", "TN"], value: o.Turno },
+    { id: "pc", label: "PC asignada", value: o.PC },
+    { id: "tipo", label: "Tipo", type: "select", opciones: ["Fijo", "Franquero", "Admin"], value: o.Tipo }
+  ], onSave: async (vals) => {
+    const r = await api({ action: "editaroperador", nombreOriginal: nombre, ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarOperadores();
+  }});
+}
+
+function modalResetPin(nombre) {
+  abrirModal({ titulo: "Resetear PIN: " + nombre, campos: [
+    { id: "pinNuevo", label: "PIN nuevo" }
+  ], onSave: async (vals) => {
+    if (!vals.pinNuevo) return alert("Falta PIN");
+    const r = await api({ action: "setpinoperador", nombre, pinNuevo: vals.pinNuevo });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); alert("PIN actualizado.");
+  }});
+}
+
+async function toggleActivoOperador(nombre, activar) {
+  const r = await api({ action: "setactivoperador", nombre, activo: activar ? "Sí" : "No" });
+  if (!r.ok) return alert(r.error);
+  cargarOperadores();
+}
+
+async function eliminarOperador(nombre) {
+  if (!confirm("¿Eliminar operador " + nombre + " definitivamente? Mejor desactivarlo si tiene historial.")) return;
+  const r = await api({ action: "eliminaroperador", nombre });
+  if (!r.ok) return alert(r.error);
+  cargarOperadores();
+}
+
+// =========== TELÉFONOS ===========
+
+async function cargarTelefonos() {
+  const r = await api({ action: "gettelefonosadmin" });
+  if (!r.ok) return;
+  _telefonosCache = r.telefonos || [];
+  renderTelefonos();
+}
+
+function renderTelefonos() {
+  const box = document.getElementById("telefonosBox");
+  const fLinea = (document.getElementById("filterTelLinea").value || "").toLowerCase();
+  const fPC = document.getElementById("filterTelPC").value;
+  const fTipo = document.getElementById("filterTelTipo").value;
+
+  const tels = _telefonosCache.filter(t => {
+    if (fLinea && !String(t.linea || "").toLowerCase().includes(fLinea)) return false;
+    if (fPC && t.pc !== fPC) return false;
+    if (fTipo && t.tipo !== fTipo) return false;
+    return true;
+  });
+
+  if (!tels.length) { box.innerHTML = '<div class="empty-state">Sin teléfonos.</div>'; return; }
+
+  box.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Línea</th><th>Tipo</th><th>PC</th><th>Estado esperado</th><th>Activo</th><th>Número</th><th></th>
+      </tr></thead>
+      <tbody>${tels.map(t => `
+        <tr>
+          <td><b>${escape(t.linea)}</b></td>
+          <td>${escape(t.tipo)}</td>
+          <td>${escape(t.pc)}</td>
+          <td>${escape(t.estadoEsperado)}</td>
+          <td><span class="badge ${(String(t.activoEnSistema).toLowerCase()==='sí'||String(t.activoEnSistema).toLowerCase()==='si')?'green':'red'}">${escape(t.activoEnSistema)}</span></td>
+          <td>${escape(t.numero)}</td>
+          <td class="actions">
+            <button class="btn-sm secondary" onclick="modalEditarTelefono('${escape(t.linea)}','${escape(t.pc)}')">Editar</button>
+            <button class="btn-sm secondary" onclick="verLogTelefono('${escape(t.linea)}','${escape(t.pc)}')">Log</button>
+            <button class="btn-sm danger" onclick="eliminarTelefono('${escape(t.linea)}','${escape(t.pc)}')">×</button>
+          </td>
+        </tr>`).join("")}</tbody>
+    </table>`;
+}
+
+function modalNuevoTelefono() {
+  abrirModal({ titulo: "Nuevo teléfono", campos: [
+    { id: "linea", label: "Línea (ej: Principal 1)" },
+    { id: "tipo", label: "Tipo", type: "select", opciones: ["Principal", "Soporte"] },
+    { id: "pc", label: "PC" },
+    { id: "estadoEsperado", label: "Estado esperado", type: "select", opciones: ["Activo", "Inactivo"] },
+    { id: "activoEnSistema", label: "Activo en sistema", type: "select", opciones: ["Sí", "No"] },
+    { id: "numero", label: "Número" }
+  ], onSave: async (vals) => {
+    const r = await api({ action: "creartelefono", ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarTelefonos();
+  }});
+}
+
+function modalEditarTelefono(linea, pc) {
+  const t = _telefonosCache.find(x => x.linea === linea && x.pc === pc);
+  if (!t) return;
+  abrirModal({ titulo: "Editar: " + linea + " / " + pc, campos: [
+    { id: "linea", label: "Línea", value: t.linea },
+    { id: "tipo", label: "Tipo", type: "select", opciones: ["Principal", "Soporte"], value: t.tipo },
+    { id: "pc", label: "PC", value: t.pc },
+    { id: "estadoEsperado", label: "Estado esperado", type: "select", opciones: ["Activo", "Inactivo"], value: t.estadoEsperado },
+    { id: "activoEnSistema", label: "Activo en sistema", type: "select", opciones: ["Sí", "No"], value: t.activoEnSistema },
+    { id: "numero", label: "Número", value: t.numero }
+  ], onSave: async (vals) => {
+    const r = await api({ action: "editartelefono", lineaOriginal: linea, pcOriginal: pc, ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarTelefonos();
+  }});
+}
+
+async function eliminarTelefono(linea, pc) {
+  if (!confirm("¿Eliminar " + linea + " de " + pc + "?")) return;
+  const r = await api({ action: "eliminartelefono", linea, pc });
+  if (!r.ok) return alert(r.error);
+  cargarTelefonos();
+}
+
+async function verLogTelefono(linea, pc) {
+  const r = await api({ action: "getlogtelefonosadmin", linea, pc });
+  let html = "";
+  if (!r.ok || !r.log.length) html = '<div class="empty-state">Sin caídas registradas.</div>';
+  else html = `<table><thead><tr><th>Cuándo</th><th>Caída</th><th>Operador</th><th>Motivo</th><th>Levantado</th><th>Duración</th><th>Estado</th></tr></thead>
+    <tbody>${r.log.map(e => `<tr>
+      <td>${e.timestamp ? new Date(e.timestamp).toLocaleString() : ''}</td>
+      <td>${escape(e.horaCaida)}</td><td>${escape(e.operadorCaida)}</td><td>${escape(e.motivo)}</td>
+      <td>${escape(e.horaLevantado)}</td><td>${e.duracion ? e.duracion + ' min' : ''}</td>
+      <td><span class="badge ${e.estado==='Cerrada'?'green':'red'}">${escape(e.estado)}</span></td>
+    </tr>`).join("")}</tbody></table>`;
+  abrirModal({ titulo: "Log: " + linea + " (" + pc + ")", html, soloLectura: true });
+}
+
+// =========== TAREAS ===========
+
+let _tareasCache = [];
+
+async function cargarTareas() {
+  const r = await api({ action: "gettareasadmin" });
+  if (!r.ok) return;
+  _tareasCache = r.tareas || [];
+  renderTareas();
+}
+
+function renderTareas() {
+  const box = document.getElementById("tareasBox");
+  const fPC = document.getElementById("filterTareaPC").value;
+  const fEst = document.getElementById("filterTareaEstado").value;
+
+  const tareas = _tareasCache.filter(t => {
+    if (fPC && t.pc !== fPC) return false;
+    const est = String(t.estado || "").toLowerCase();
+    if (fEst === "completada" && est !== "completada") return false;
+    if (fEst === "pendiente" && est === "completada") return false;
+    return true;
+  });
+
+  if (!tareas.length) { box.innerHTML = '<div class="empty-state">Sin tareas.</div>'; return; }
+
+  box.innerHTML = `
+    <table>
+      <thead><tr><th>PC</th><th>Tarea</th><th>Asignada</th><th>Estado</th><th>Completada</th><th>Por</th><th></th></tr></thead>
+      <tbody>${tareas.map(t => {
+        const completa = String(t.estado || "").toLowerCase() === "completada";
+        return `<tr class="${completa?'inactive':''}">
+          <td><b>${escape(t.pc)}</b></td>
+          <td>${escape(t.tarea)}</td>
+          <td>${escape(t.fecha || "")}</td>
+          <td><span class="badge ${completa?'green':'yellow'}">${escape(t.estado || 'Pendiente')}</span></td>
+          <td>${escape(t.fechaCompletada || "")}</td>
+          <td>${escape(t.completoPor || "")}</td>
+          <td class="actions">
+            <button class="btn-sm danger" onclick="eliminarTarea(${t.fila})">×</button>
+          </td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table>`;
+}
+
+function modalNuevaTarea() {
+  abrirModal({ titulo: "Nueva tarea", campos: [
+    { id: "pc", label: "PC", type: "select", opciones: _pcsCache.map(p => p.PC) },
+    { id: "tareaTexto", label: "Tarea", type: "textarea" }
+  ], onSave: async (vals) => {
+    if (!vals.pc || !vals.tareaTexto) return alert("Completá todos los campos");
+    const r = await api({ action: "creartarea", ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarTareas();
+  }});
+}
+
+async function eliminarTarea(fila) {
+  if (!confirm("¿Eliminar tarea?")) return;
+  const r = await api({ action: "eliminartarea", fila });
+  if (!r.ok) return alert(r.error);
+  cargarTareas();
+}
+
+// =========== NOVEDADES ===========
+
+async function cargarNovedades() {
+  const box = document.getElementById("novedadesBox");
+  box.innerHTML = '<div class="empty-state">Cargando...</div>';
+  const pc = document.getElementById("filterNovPC").value;
+  const estado = document.getElementById("filterNovEstado").value;
+  const r = await api({ action: "getnovedadesadmin", pc, estado });
+  if (!r.ok) { box.innerHTML = '<div class="empty-state">Error.</div>'; return; }
+  if (!r.novedades.length) { box.innerHTML = '<div class="empty-state">Sin novedades.</div>'; return; }
+
+  box.innerHTML = `
+    <table>
+      <thead><tr><th>Fecha</th><th>PC</th><th>Operador</th><th>Tipo</th><th>Prioridad</th><th>Detalle</th><th>Estado</th><th>Resolución</th><th></th></tr></thead>
+      <tbody>${r.novedades.map(n => `
+        <tr>
+          <td>${escape(n.fecha)}</td>
+          <td><b>${escape(n.pc)}</b></td>
+          <td>${escape(n.operador)}</td>
+          <td>${escape(n.tipo)}</td>
+          <td><span class="badge ${(n.prioridad==='Alta')?'red':(n.prioridad==='Media'?'yellow':'gray')}">${escape(n.prioridad)}</span></td>
+          <td>${escape(n.detalle)}</td>
+          <td><span class="badge ${(String(n.estado).toLowerCase()==='resuelta')?'green':((String(n.estado).toLowerCase()==='en seguimiento')?'yellow':'red')}">${escape(n.estado)}</span></td>
+          <td>${escape(n.resolucion || "")}</td>
+          <td class="actions">
+            <button class="btn-sm warning" onclick="cambiarEstadoNovedad('${escape(n.id)}', 'En seguimiento')">Seguimiento</button>
+            <button class="btn-sm success" onclick="cambiarEstadoNovedad('${escape(n.id)}', 'Resuelta')">Resolver</button>
+            <button class="btn-sm danger" onclick="eliminarNovedad('${escape(n.id)}')">×</button>
+          </td>
+        </tr>`).join("")}</tbody>
+    </table>`;
+}
+
+async function cambiarEstadoNovedad(id, estado) {
+  const resolucion = prompt("Resolución / nota (opcional):") || "";
+  const r = await api({ action: "actualizarnovedad", id, estado, resolucion });
+  if (!r.ok) return alert(r.error);
+  cargarNovedades();
+}
+
+async function eliminarNovedad(id) {
+  if (!confirm("¿Eliminar novedad?")) return;
+  const r = await api({ action: "eliminarnovedad", id });
+  if (!r.ok) return alert(r.error);
+  cargarNovedades();
+}
+
+// =========== HISTÓRICO ===========
+
+async function cargarHistorial() {
+  const box = document.getElementById("historialBox");
+  box.innerHTML = '<div class="empty-state">Cargando...</div>';
+  const tipo = document.getElementById("filterHistTipo").value;
+  const desde = document.getElementById("filterHistDesde").value;
+  const hasta = document.getElementById("filterHistHasta").value;
+  const pc = document.getElementById("filterHistPC").value;
+  const operador = document.getElementById("filterHistOperador").value;
+
+  let r, html = "";
+  if (tipo === "fichajes") {
+    r = await api({ action: "getfichajes", desde, hasta, operador });
+    if (!r.ok || !r.fichajes.length) { box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return; }
+    html = `<table><thead><tr><th>Fecha</th><th>Hora</th><th>Operador</th><th>Turno</th><th>PC</th><th>Acción</th><th>Estado</th><th>Tarde min</th><th>Obs.</th></tr></thead>
+      <tbody>${r.fichajes.map(f => `<tr>
+        <td>${escape(f.fecha)}</td><td>${escape(f.hora)}</td><td><b>${escape(f.nombre)}</b></td>
+        <td>${escape(f.turno)}</td><td>${escape(f.pc)}</td>
+        <td><span class="badge ${f.accion==='Ingreso'?'green':'gray'}">${escape(f.accion)}</span></td>
+        <td>${escape(f.estado)}</td><td>${escape(f.minutosTarde||'')}</td><td>${escape(f.observaciones||'')}</td>
+      </tr>`).join("")}</tbody></table>`;
+  } else if (tipo === "pausas") {
+    r = await api({ action: "getpausasadmin", desde, hasta, pc, operador });
+    if (!r.ok || !r.pausas.length) { box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return; }
+    html = `<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Operador</th><th>PC</th><th>Salida</th><th>Regreso</th><th>Min</th><th>Excedió</th><th>Estado</th></tr></thead>
+      <tbody>${r.pausas.map(p => `<tr>
+        <td>${escape(p.fecha)}</td><td><span class="badge blue">${escape(p.tipoPausa)}</span></td>
+        <td><b>${escape(p.operador)}</b></td><td>${escape(p.pc)}</td>
+        <td>${escape(p.horaSalida)}</td><td>${escape(p.horaRegreso)}</td>
+        <td>${escape(p.minutos)}</td>
+        <td><span class="badge ${(String(p.excedio).toLowerCase()==='sí'||String(p.excedio).toLowerCase()==='si')?'red':'green'}">${escape(p.excedio)}</span></td>
+        <td>${escape(p.estado)}</td>
+      </tr>`).join("")}</tbody></table>`;
+  } else if (tipo === "recepciones") {
+    r = await api({ action: "getrecepciones", desde, hasta, pc });
+    if (!r.ok || !r.recepciones.length) { box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return; }
+    html = `<table><thead><tr><th>Fecha</th><th>Turno</th><th>PC</th><th>Recibe</th><th>Entrega</th><th>Caja</th><th>WhatsApp</th><th>Limpieza</th><th>Obs.</th></tr></thead>
+      <tbody>${r.recepciones.map(re => `<tr>
+        <td>${escape(re.fecha)}</td><td>${escape(re.turno)}</td><td><b>${escape(re.pc)}</b></td>
+        <td>${escape(re.recibe)}</td><td>${escape(re.entrega)}</td>
+        <td>${escape(re.cajaOk)}${re.diferenciaCaja?(' · '+escape(re.diferenciaCaja)):''}</td>
+        <td>${escape(re.whatsappOk)}</td><td>${escape(re.limpieza)}</td><td>${escape(re.observaciones)}</td>
+      </tr>`).join("")}</tbody></table>`;
+  } else if (tipo === "logtelefonos") {
+    r = await api({ action: "getlogtelefonosadmin", desde, hasta, pc });
+    if (!r.ok || !r.log.length) { box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return; }
+    html = `<table><thead><tr><th>Fecha</th><th>PC</th><th>Línea</th><th>Caída</th><th>Operador</th><th>Motivo</th><th>Levantado</th><th>Duración</th><th>Estado</th></tr></thead>
+      <tbody>${r.log.map(e => `<tr>
+        <td>${e.timestamp ? new Date(e.timestamp).toLocaleString() : ''}</td>
+        <td><b>${escape(e.pc)}</b></td><td>${escape(e.linea)}</td>
+        <td>${escape(e.horaCaida)}</td><td>${escape(e.operadorCaida)}</td><td>${escape(e.motivo)}</td>
+        <td>${escape(e.horaLevantado)}</td><td>${e.duracion?e.duracion+' min':''}</td>
+        <td><span class="badge ${e.estado==='Cerrada'?'green':'red'}">${escape(e.estado)}</span></td>
+      </tr>`).join("")}</tbody></table>`;
+  }
+  box.innerHTML = html;
+}
+
+// =========== MODAL ===========
+
+function abrirModal({ titulo, campos, onSave, html, soloLectura }) {
+  const root = document.getElementById("modalRoot");
+  let cuerpo = "";
+  if (html) cuerpo = html;
+  else if (campos) {
+    cuerpo = campos.map(c => {
+      if (c.type === "textarea") {
+        return `<label>${escape(c.label)}</label><textarea id="modal-${c.id}" placeholder="${escape(c.placeholder||'')}">${escape(c.value||'')}</textarea>`;
+      }
+      if (c.type === "select") {
+        return `<label>${escape(c.label)}</label><select id="modal-${c.id}">${
+          c.opciones.map(o => `<option value="${escape(o)}" ${o===c.value?'selected':''}>${escape(o)}</option>`).join("")
+        }</select>`;
+      }
+      return `<label>${escape(c.label)}</label><input id="modal-${c.id}" type="${c.type||'text'}" placeholder="${escape(c.placeholder||'')}" value="${escape(c.value||'')}" />`;
+    }).join("");
+  }
+
+  root.innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <h3>${escape(titulo)}</h3>
+        ${cuerpo}
+        <div class="row-buttons">
+          ${soloLectura ? '' : '<button class="success" onclick="_modalSave()">Guardar</button>'}
+          <button class="secondary" onclick="cerrarModal()">${soloLectura?'Cerrar':'Cancelar'}</button>
+        </div>
+      </div>
+    </div>`;
+
+  window._modalSave = async () => {
+    if (!campos) return cerrarModal();
+    const vals = {};
+    campos.forEach(c => {
+      const el = document.getElementById("modal-" + c.id);
+      if (el) vals[c.id] = el.value;
+    });
+    if (onSave) await onSave(vals);
+  };
+}
+
+function cerrarModal() {
+  document.getElementById("modalRoot").innerHTML = "";
+  window._modalSave = null;
+}
+
+// =========== INIT ===========
+
+(function init() {
+  const cached = localStorage.getItem("ctrlAdmin");
+  if (cached) {
+    try { admin = JSON.parse(cached); mostrarApp(); } catch(e) {}
+  }
+})();
+</script>
+</body>
+</html>
