@@ -818,7 +818,8 @@ function getPCs_() {
     .filter(p => String(p.Estado || '').trim().toLowerCase() === 'activa')
     .map(p => ({
       pc: String(p.PC || '').trim(),
-      orden: Number(p['Orden rotación llmpieza'] || p['Orden rotación limpieza'] || p['Orden rotacion limpieza'] || 999)
+      orden: Number(p['Orden rotación llmpieza'] || p['Orden rotación limpieza'] || p['Orden rotacion limpieza'] || 999),
+      turnoLimpieza: String(p['Turno limpieza'] || p['Turno Limpieza'] || '').trim().toUpperCase()
     }))
     .filter(p => p.pc)
     .sort((a, b) => a.orden - b.orden);
@@ -833,15 +834,21 @@ function getLimpiezaHoy_() {
   const dia = Math.floor(
     (Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate())) / (24 * 3600 * 1000)
   );
-  const idx = ((dia % r.pcs.length) + r.pcs.length) % r.pcs.length;
-  const elegida = r.pcs[idx];
+  const n = r.pcs.length;
+  const idxHoy     = ((dia % n) + n) % n;
+  const idxManana  = ((dia + 1) % n + n) % n;
+
+  const hoy    = r.pcs[idxHoy];
+  const manana = r.pcs[idxManana];
 
   return {
     ok: true,
-    pc: elegida.pc,
-    orden: elegida.orden,
-    fecha: fecha_(ahora),
-    rotacion: r.pcs.map(p => p.pc)
+    pc:            hoy.pc,
+    turno:         hoy.turnoLimpieza,
+    orden:         hoy.orden,
+    fecha:         fecha_(ahora),
+    manana:        { pc: manana.pc, turno: manana.turnoLimpieza },
+    rotacion:      r.pcs.map(p => p.pc + (p.turnoLimpieza ? ' ' + p.turnoLimpieza : ''))
   };
 }
 

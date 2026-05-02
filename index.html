@@ -673,11 +673,21 @@
     const box  = document.getElementById("limpiezaAvisoBox");
     if (!r.ok || !r.pc) { card.classList.add("hidden"); return; }
 
-    const meToca = String(r.pc).toLowerCase() === String(operador.pc || "").toLowerCase();
+    const meToca = String(r.pc).toLowerCase() === String(operador.pc || "").toLowerCase()
+      && (!r.turno || r.turno === operador.turno);
+
+    const turnoHoy    = r.turno    ? ` (${r.turno})`    : "";
+    const turnoManana = r.manana && r.manana.turno ? ` (${r.manana.turno})` : "";
+    const mananaInfo  = r.manana
+      ? `<div class="small" style="margin-top:6px">Mañana limpia <b>${r.manana.pc}</b>${turnoManana}</div>`
+      : "";
+
     box.innerHTML = meToca
-      ? `<div class="alert">Hoy <b>${r.pc}</b> tiene la limpieza asignada — te toca a vos.</div>
+      ? `<div class="alert">Hoy <b>${r.pc}</b>${turnoHoy} tiene la limpieza — te toca a vos.</div>
+         ${mananaInfo}
          <span class="small">Rotación: ${r.rotacion.join(" → ")}</span>`
-      : `<div class="alert ok">Hoy limpia <b>${r.pc}</b>.</div>
+      : `<div class="alert ok">Hoy limpia <b>${r.pc}</b>${turnoHoy}.</div>
+         ${mananaInfo}
          <span class="small">Rotación: ${r.rotacion.join(" → ")}</span>`;
     card.classList.remove("hidden");
   }
