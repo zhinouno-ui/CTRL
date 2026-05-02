@@ -890,8 +890,13 @@
 
   function historialActualizarUltimo(campos) {
     const data = historialCargar();
-    const ultimo = data.items.findLast(i => i.tipo === campos.tipo && !i.fin);
-    if (ultimo) Object.assign(ultimo, campos);
+    for (let idx = data.items.length - 1; idx >= 0; idx--) {
+      const it = data.items[idx];
+      if (it && typeof it === "object" && it.tipo === campos.tipo && !it.fin) {
+        Object.assign(it, campos);
+        break;
+      }
+    }
     localStorage.setItem("historialPausas", JSON.stringify(data));
     historialRenderizar(data);
   }
@@ -903,17 +908,26 @@
       return;
     }
 
-    const iconos = { "baño": "🚽", "fumar": "🚬", "limpieza": "🧹" };
-    const labels = { "baño": "Baño", "fumar": "Fumar", "limpieza": "Limpieza" };
+    const iconos = { "baño": "🚽", "fumar": "🚬", "limpieza": "🧹", "tarea": "⚡", "info": "ℹ️" };
+    const labels = { "baño": "Baño", "fumar": "Fumar", "limpieza": "Limpieza", "tarea": "Tarea", "info": "Info" };
 
-    box.innerHTML = data.items.map(i => {
+    // Filtrar items inválidos (strings u objetos sin .tipo) que pudieran haber quedado
+    const items = data.items.filter(i => i && typeof i === "object" && i.tipo);
+
+    if (!items.length) {
+      box.innerHTML = `<span class="small">Sin registros todavía.</span>`;
+      return;
+    }
+
+    box.innerHTML = items.map(i => {
       const duracion = i.minutos != null
         ? `${i.minutos} min${i.excedio === "Sí" ? " ⚠️" : ""}`
         : "en curso...";
       const fin = i.fin ? ` → ${i.fin}` : "";
+      const label = i.label || (labels[i.tipo] || i.tipo);
       return `<div class="novedad" style="padding:10px 14px;margin-bottom:8px;">
-        ${iconos[i.tipo] || ""} <b>${labels[i.tipo] || i.tipo}</b>
-        &nbsp;·&nbsp; Inicio: ${i.inicio}${fin}
+        ${iconos[i.tipo] || "📌"} <b>${label}</b>
+        ${i.inicio ? `&nbsp;·&nbsp; ${i.inicio}${fin}` : ""}
         &nbsp;·&nbsp; <span class="small">${duracion}</span>
       </div>`;
     }).join("");
@@ -925,9 +939,20 @@
     limpieza: { tipo: "limpieza", accionInicio: "limpiezainicio", accionFin: "limpiezafin", labelInicio: "🧹 Iniciar limpieza", labelFin: "🧹 Terminar limpieza", fwTipInicio: "Iniciar limpieza", fwTipFin: "Finalizar limpieza", mainBtn: "limpiezaBtn", fwBtn: "fwLimpiezaBtn", fwTip: "fwLimpiezaTip" }
   };
 
+  let _pausaEnCurso = false;
+
   async function pausaToggle(clave) {
+    if (_pausaEnCurso) return;
+    _pausaEnCurso = true;
+
     const cfg = PAUSAS_CONFIG[clave];
     const abierta = clave === "bano" ? pausaBano : clave === "fumar" ? pausaFumar : pausaLimpieza;
+
+    // Deshabilitar todos los botones de pausa mientras procesa
+    ["banoBtn","fumarBtn","limpiezaBtn","fwBanoBtn","fwFumarBtn","fwLimpiezaBtn"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.disabled = true; el.style.opacity = "0.5"; }
+    });
 
     setMsg("accionMsg", abierta ? `Cerrando ${cfg.tipo}...` : `Iniciando ${cfg.tipo}...`);
 
@@ -940,6 +965,8 @@
     if (!r.ok) {
       setMsg("accionMsg", r.error || "Error.");
       if (r.bloqueoCruzado) alert("⚠️ " + r.error);
+      _pausaEnCurso = false;
+      actualizarBotones();
       return;
     }
 
@@ -955,6 +982,7 @@
     else if (clave === "fumar") pausaFumar = !abierta;
     else pausaLimpieza = !abierta;
 
+    _pausaEnCurso = false;
     actualizarBotones();
   }
 
@@ -973,6 +1001,8 @@
         main.textContent = abierta ? cfg.labelFin : cfg.labelInicio;
         main.classList.toggle("warning", !abierta);
         main.classList.toggle("success", abierta);
+        main.disabled = false;
+        main.style.opacity = "";
       }
 
       const fwTip = document.getElementById(cfg.fwTip);
@@ -980,11 +1010,9 @@
 
       const fwBtn = document.getElementById(cfg.fwBtn);
       if (fwBtn) {
-        if (abierta) {
-          fwBtn.style.background = "#16a765";
-        } else {
-          fwBtn.style.background = "";
-        }
+        fwBtn.style.background = abierta ? "#16a765" : "";
+        fwBtn.disabled = false;
+        fwBtn.style.opacity = "";
       }
     });
   }
@@ -1189,7 +1217,7 @@
   async function completarTarea(fila, texto) {
     const r = await api({ action: "completartarea", tareaId: fila, nombre: operador.nombre });
     if (r.ok) {
-      historialAgregar("Tarea completada: " + texto);
+      historialAgregar({ tipo: "tarea", inicio: horaActual_(), label: "Tarea: " + texto, minutos: null });
       cargarTareas();
     }
   }

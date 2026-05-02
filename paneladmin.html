@@ -267,6 +267,33 @@ const escape = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => (
   {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]
 ));
 
+// Formatea fechas de Sheets. Detecta el artefacto 1899 (tiempo sin fecha) y lo muestra solo como hora.
+function fmt(val) {
+  if (val == null || val === "") return "";
+  // Si es un número devuelto por JSON (timestamp en ms), convertir
+  const d = (typeof val === "number") ? new Date(val) : new Date(val);
+  if (isNaN(d.getTime())) return String(val);
+  // Artefacto de Google Sheets: fecha 1899-12-30 significa que la celda es solo hora
+  if (d.getFullYear() === 1899 || d.getFullYear() === 1900) {
+    return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+  return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" })
+    + " " + d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+}
+function fmtFecha(val) {
+  if (!val) return "";
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return String(val);
+  if (d.getFullYear() === 1899) return "";
+  return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+function fmtHora(val) {
+  if (!val) return "";
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return String(val);
+  return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
 async function api(params) {
   const url = API_URL + "?" + new URLSearchParams({ ...params, nombre: params.nombre || (admin ? admin.nombre : ""), _t: Date.now() }).toString();
   try {
@@ -310,6 +337,12 @@ function mostrarApp() {
   document.getElementById("adminWho").textContent = admin.nombre;
   cargarDashboard();
   cargarPCsCache();
+
+  // Auto-refresh dashboard cada 30s
+  setInterval(() => {
+    const dashActive = document.getElementById("section-dashboard").classList.contains("active");
+    if (dashActive) cargarDashboard();
+  }, 30000);
 }
 
 // =========== NAV ===========
@@ -649,11 +682,11 @@ async function verLogTelefono(linea, pc) {
   const r = await api({ action: "getlogtelefonosadmin", linea, pc });
   let html = "";
   if (!r.ok || !r.log.length) html = '<div class="empty-state">Sin caídas registradas.</div>';
-  else html = `<table><thead><tr><th>Cuándo</th><th>Caída</th><th>Operador</th><th>Motivo</th><th>Levantado</th><th>Duración</th><th>Estado</th></tr></thead>
+  else html = `<table><thead><tr><th>Fecha</th><th>Caída</th><th>Operador</th><th>Motivo</th><th>Levantado</th><th>Duración</th><th>Estado</th></tr></thead>
     <tbody>${r.log.map(e => `<tr>
-      <td>${e.timestamp ? new Date(e.timestamp).toLocaleString() : ''}</td>
-      <td>${escape(e.horaCaida)}</td><td>${escape(e.operadorCaida)}</td><td>${escape(e.motivo)}</td>
-      <td>${escape(e.horaLevantado)}</td><td>${e.duracion ? e.duracion + ' min' : ''}</td>
+      <td>${escape(fmtFecha(e.timestamp))}</td>
+      <td>${escape(fmtHora(e.horaCaida))}</td><td>${escape(e.operadorCaida)}</td><td>${escape(e.motivo)}</td>
+      <td>${escape(fmtHora(e.horaLevantado))}</td><td>${e.duracion ? e.duracion + ' min' : ''}</td>
       <td><span class="badge ${e.estado==='Cerrada'?'green':'red'}">${escape(e.estado)}</span></td>
     </tr>`).join("")}</tbody></table>`;
   abrirModal({ titulo: "Log: " + linea + " (" + pc + ")", html, soloLectura: true });
@@ -788,7 +821,9 @@ async function cargarHistorial() {
     if (!r.ok || !r.fichajes.length) { box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return; }
     html = `<table><thead><tr><th>Fecha</th><th>Hora</th><th>Operador</th><th>Turno</th><th>PC</th><th>Acción</th><th>Estado</th><th>Tarde min</th><th>Obs.</th></tr></thead>
       <tbody>${r.fichajes.map(f => `<tr>
-        <td>${escape(f.fecha)}</td><td>${escape(f.hora)}</td><td><b>${escape(f.nombre)}</b></td>
+        <td>${escape(fmtFecha(f.timestamp) || f.fecha)}</td>
+        <td>${escape(fmtHora(f.timestamp) || f.hora)}</td>
+        <td><b>${escape(f.nombre)}</b></td>
         <td>${escape(f.turno)}</td><td>${escape(f.pc)}</td>
         <td><span class="badge ${f.accion==='Ingreso'?'green':'gray'}">${escape(f.accion)}</span></td>
         <td>${escape(f.estado)}</td><td>${escape(f.minutosTarde||'')}</td><td>${escape(f.observaciones||'')}</td>
@@ -796,11 +831,13 @@ async function cargarHistorial() {
   } else if (tipo === "pausas") {
     r = await api({ action: "getpausasadmin", desde, hasta, pc, operador });
     if (!r.ok || !r.pausas.length) { box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return; }
-    html = `<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Operador</th><th>PC</th><th>Salida</th><th>Regreso</th><th>Min</th><th>Excedió</th><th>Estado</th></tr></thead>
+    html = `<table><thead><tr><th>Fecha</th><th>Hora salida</th><th>Tipo</th><th>Operador</th><th>PC</th><th>Regreso</th><th>Min</th><th>Excedió</th><th>Estado</th></tr></thead>
       <tbody>${r.pausas.map(p => `<tr>
-        <td>${escape(p.fecha)}</td><td><span class="badge blue">${escape(p.tipoPausa)}</span></td>
+        <td>${escape(fmtFecha(p.timestamp) || p.fecha)}</td>
+        <td>${escape(fmtHora(p.horaSalida))}</td>
+        <td><span class="badge blue">${escape(p.tipoPausa)}</span></td>
         <td><b>${escape(p.operador)}</b></td><td>${escape(p.pc)}</td>
-        <td>${escape(p.horaSalida)}</td><td>${escape(p.horaRegreso)}</td>
+        <td>${escape(fmtHora(p.horaRegreso))}</td>
         <td>${escape(p.minutos)}</td>
         <td><span class="badge ${(String(p.excedio).toLowerCase()==='sí'||String(p.excedio).toLowerCase()==='si')?'red':'green'}">${escape(p.excedio)}</span></td>
         <td>${escape(p.estado)}</td>
@@ -808,9 +845,11 @@ async function cargarHistorial() {
   } else if (tipo === "recepciones") {
     r = await api({ action: "getrecepciones", desde, hasta, pc });
     if (!r.ok || !r.recepciones.length) { box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return; }
-    html = `<table><thead><tr><th>Fecha</th><th>Turno</th><th>PC</th><th>Recibe</th><th>Entrega</th><th>Caja</th><th>WhatsApp</th><th>Limpieza</th><th>Obs.</th></tr></thead>
+    html = `<table><thead><tr><th>Fecha</th><th>Hora</th><th>Turno</th><th>PC</th><th>Recibe</th><th>Entrega</th><th>Caja</th><th>WhatsApp</th><th>Limpieza</th><th>Obs.</th></tr></thead>
       <tbody>${r.recepciones.map(re => `<tr>
-        <td>${escape(re.fecha)}</td><td>${escape(re.turno)}</td><td><b>${escape(re.pc)}</b></td>
+        <td>${escape(fmtFecha(re.timestamp) || re.fecha)}</td>
+        <td>${escape(fmtHora(re.timestamp))}</td>
+        <td>${escape(re.turno)}</td><td><b>${escape(re.pc)}</b></td>
         <td>${escape(re.recibe)}</td><td>${escape(re.entrega)}</td>
         <td>${escape(re.cajaOk)}${re.diferenciaCaja?(' · '+escape(re.diferenciaCaja)):''}</td>
         <td>${escape(re.whatsappOk)}</td><td>${escape(re.limpieza)}</td><td>${escape(re.observaciones)}</td>
@@ -818,12 +857,14 @@ async function cargarHistorial() {
   } else if (tipo === "logtelefonos") {
     r = await api({ action: "getlogtelefonosadmin", desde, hasta, pc });
     if (!r.ok || !r.log.length) { box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return; }
-    html = `<table><thead><tr><th>Fecha</th><th>PC</th><th>Línea</th><th>Caída</th><th>Operador</th><th>Motivo</th><th>Levantado</th><th>Duración</th><th>Estado</th></tr></thead>
+    html = `<table><thead><tr><th>Fecha</th><th>Hora caída</th><th>PC</th><th>Línea</th><th>Operador</th><th>Motivo</th><th>Levantado</th><th>Duración</th><th>Estado</th></tr></thead>
       <tbody>${r.log.map(e => `<tr>
-        <td>${e.timestamp ? new Date(e.timestamp).toLocaleString() : ''}</td>
+        <td>${escape(fmtFecha(e.timestamp))}</td>
+        <td>${escape(fmtHora(e.horaCaida))}</td>
         <td><b>${escape(e.pc)}</b></td><td>${escape(e.linea)}</td>
-        <td>${escape(e.horaCaida)}</td><td>${escape(e.operadorCaida)}</td><td>${escape(e.motivo)}</td>
-        <td>${escape(e.horaLevantado)}</td><td>${e.duracion?e.duracion+' min':''}</td>
+        <td>${escape(e.operadorCaida)}</td><td>${escape(e.motivo)}</td>
+        <td>${escape(fmtHora(e.horaLevantado))}</td>
+        <td>${e.duracion ? e.duracion + ' min' : ''}</td>
         <td><span class="badge ${e.estado==='Cerrada'?'green':'red'}">${escape(e.estado)}</span></td>
       </tr>`).join("")}</tbody></table>`;
   }
