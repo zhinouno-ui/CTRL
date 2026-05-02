@@ -818,13 +818,15 @@ function getPCs_() {
     .filter(p => String(p.Estado || '').trim().toLowerCase() === 'activa')
     .map(p => ({
       pc: String(p.PC || '').trim(),
-      orden: Number(p['Orden rotación llmpieza'] || p['Orden rotación limpieza'] || p['Orden rotacion limpieza'] || 999),
-      turnoLimpieza: String(p['Turno limpieza'] || p['Turno Limpieza'] || '').trim().toUpperCase()
+      orden: Number(p['Orden rotación llmpieza'] || p['Orden rotación limpieza'] || p['Orden rotacion limpieza'] || 999)
     }))
     .filter(p => p.pc)
     .sort((a, b) => a.orden - b.orden);
   return { ok: true, pcs };
 }
+
+// Turnos que rotan para la limpieza, independiente de qué PC toca
+const TURNOS_LIMPIEZA = ['TM', 'TT', 'TN'];
 
 function getLimpiezaHoy_() {
   const r = getPCs_();
@@ -834,21 +836,25 @@ function getLimpiezaHoy_() {
   const dia = Math.floor(
     (Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate())) / (24 * 3600 * 1000)
   );
-  const n = r.pcs.length;
-  const idxHoy     = ((dia % n) + n) % n;
-  const idxManana  = ((dia + 1) % n + n) % n;
 
-  const hoy    = r.pcs[idxHoy];
-  const manana = r.pcs[idxManana];
+  const nPCs    = r.pcs.length;
+  const nTurnos = TURNOS_LIMPIEZA.length;
+
+  function pcDia(d)    { return r.pcs[((d % nPCs)    + nPCs)    % nPCs]; }
+  function turnoDia(d) { return TURNOS_LIMPIEZA[((d % nTurnos) + nTurnos) % nTurnos]; }
+
+  const hoyPC     = pcDia(dia);
+  const hoyTurno  = turnoDia(dia);
+  const manPC     = pcDia(dia + 1);
+  const manTurno  = turnoDia(dia + 1);
 
   return {
-    ok: true,
-    pc:            hoy.pc,
-    turno:         hoy.turnoLimpieza,
-    orden:         hoy.orden,
-    fecha:         fecha_(ahora),
-    manana:        { pc: manana.pc, turno: manana.turnoLimpieza },
-    rotacion:      r.pcs.map(p => p.pc + (p.turnoLimpieza ? ' ' + p.turnoLimpieza : ''))
+    ok:      true,
+    pc:      hoyPC.pc,
+    turno:   hoyTurno,
+    fecha:   fecha_(ahora),
+    manana:  { pc: manPC.pc, turno: manTurno },
+    rotacion: r.pcs.map(p => p.pc)
   };
 }
 
