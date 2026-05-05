@@ -114,6 +114,8 @@
     pointer-events: none;
   }
   .btn-ok-pop { animation: ctrlOkPop 0.35s ease; }
+  @keyframes ctrlFadeIn { from { opacity:0.2 } to { opacity:1 } }
+  .section-fade { animation: ctrlFadeIn 0.25s ease; }
   .stat { display:inline-block; margin-right:14px; }
   .stat .stat-num { font-size:24px; font-weight:bold; }
   .stat .stat-label { font-size:11px; color:#aaa; text-transform:uppercase; }
@@ -505,6 +507,31 @@ function _cancelarImagen(textareaId, previewId) {
   if (preview) preview.innerHTML = "";
 }
 
+// Suaviza recargas de sección: fade out rápido → actualiza → fade in
+// Asigna HTML a un box con fade suave si el contenido cambia
+function _renderBox(box, html) {
+  if (!box) return;
+  const mismoContenido = box.innerHTML === html;
+  if (mismoContenido) return;
+  box.classList.remove("section-fade");
+  void box.offsetWidth; // reflow para reiniciar la animación
+  box.innerHTML = html;
+  box.classList.add("section-fade");
+  setTimeout(() => box.classList.remove("section-fade"), 350);
+}
+
+async function _suavizarRecarga(boxId, fn) {
+  const box = document.getElementById(boxId);
+  if (box) { box.style.transition = "opacity 0.15s"; box.style.opacity = "0.15"; }
+  await fn();
+  if (box) {
+    box.style.opacity = "";
+    box.style.transition = "";
+    box.classList.add("section-fade");
+    setTimeout(() => box.classList.remove("section-fade"), 300);
+  }
+}
+
 function _animBtn(btn, textoEspera) {
   if (!btn) return () => {};
   const orig = { html: btn.innerHTML, bg: btn.style.background, color: btn.style.color, cls: btn.className };
@@ -617,7 +644,9 @@ function cambiarSeccion(seccion) {
     b.classList.toggle("active", b.dataset.section === seccion);
   });
   document.querySelectorAll(".section").forEach(s => {
-    s.classList.toggle("active", s.id === "section-" + seccion);
+    const activa = s.id === "section-" + seccion;
+    s.classList.toggle("active", activa);
+    if (activa) { s.classList.add("section-fade"); setTimeout(() => s.classList.remove("section-fade"), 300); }
   });
   if (seccion === "dashboard") cargarDashboard();
   if (seccion === "pcs") cargarPCs();
@@ -757,6 +786,8 @@ async function cargarPCs() {
         </tr>`).join('')}
       </tbody>
     </table>` + rotHtml;
+  box.classList.add("section-fade");
+  setTimeout(() => box.classList.remove("section-fade"), 350);
 }
 
 async function ajustarTurnoHoy(btn) {
@@ -769,12 +800,36 @@ async function ajustarTurnoHoy(btn) {
     confirmar(true, "✓ Guardado");
     msg.style.color = "#3eb368";
     msg.textContent = turno + " limpia hoy";
-    setTimeout(() => cargarPCs(), 900);
+    // Solo actualiza la tabla de rotación, sin recargar las PCs completas
+    _actualizarTablaRotacion();
   } else {
     confirmar(false, "✗ Error");
     msg.style.color = "#d93025";
     msg.textContent = r.error || "Error";
   }
+}
+
+// Actualiza solo la tabla de rotación sin reconstruir toda la sección PCs
+async function _actualizarTablaRotacion() {
+  const rot = await api({ action: "getlimpiezasemana" });
+  if (!rot.ok || !rot.dias.length) return;
+  const tablaEl = document.querySelector(".rotacion-tabla");
+  if (!tablaEl) return;
+  const tbody = tablaEl.querySelector("tbody");
+  if (!tbody) return;
+  tbody.style.opacity = "0.3";
+  tbody.style.transition = "opacity 0.2s";
+  tbody.innerHTML = rot.dias.map(d => `
+    <tr class="${d.esHoy ? "hoy" : ""}">
+      <td>${escape(d.diaSemana)}</td>
+      <td>${escape(d.fecha)}</td>
+      <td class="pc-limpiar">${escape(d.pc)}${d.esHoy ? " ← HOY" : ""}</td>
+      <td><span class="badge ${d.turno==='TM'?'green':(d.turno==='TT'?'yellow':'blue')}">${escape(d.turno)}</span></td>
+    </tr>`).join("");
+  // Actualiza también el select para que muestre el turno correcto
+  const sel = document.getElementById("turnoHoySelect");
+  if (sel && rot.turnoHoy) sel.value = rot.turnoHoy;
+  requestAnimationFrame(() => { tbody.style.opacity = "1"; });
 }
 
 function modalNuevaPC() {
@@ -890,11 +945,11 @@ function renderOperadores() {
   }
 
   if (!ops.length) {
-    box.innerHTML = statsHtml + charts + topHtml + '<div class="empty-state">Sin resultados.</div>';
+    _renderBox(box, statsHtml + charts + topHtml + '<div class="empty-state">Sin resultados.</div>');
     return;
   }
 
-  box.innerHTML = statsHtml + charts + topHtml + `
+  _renderBox(box, statsHtml + charts + topHtml + `
     <table>
       <thead><tr>
         <th>Nombre</th><th>PIN</th><th>Turno</th><th>PC</th><th>Tipo</th><th>Activo</th><th></th>
@@ -917,7 +972,7 @@ function renderOperadores() {
           </td>
         </tr>`;
       }).join("")}</tbody>
-    </table>`;
+    </table>`);
 }
 
 function modalNuevoOperador() {
