@@ -1757,9 +1757,16 @@ function cerrarModal() {
 
 let _chatAdminUltimoTs = null;
 let _chatAdminInterval = null;
+let _chatAdminEnviando = false;
+let _chatAdminSentRecently = [];
 
 async function chatAdminIniciar() {
-  if (_chatAdminInterval) return; // ya corriendo
+  if (_chatAdminInterval) {
+    // Ya corriendo — solo refrescar el box si se re-entra a la sección
+    const box = document.getElementById("chatAdminMensajes");
+    if (box && !box.children.length) chatAdminCargar(false);
+    return;
+  }
   await chatAdminCargar(false);
   _chatAdminInterval = setInterval(() => chatAdminCargar(true), 8000);
   const input = document.getElementById("chatAdminInput");
@@ -1780,31 +1787,71 @@ async function chatAdminCargar(silencioso) {
     return;
   }
   const yo = (admin && admin.nombre || "").toLowerCase();
+  let huboNuevos = false;
   r.mensajes.forEach(m => {
+    if (!m.timestamp) return;
+    // Skip mensajes propios ya renderizados optimistamente
+    if (String(m.operador || "").toLowerCase() === yo) {
+      const idx = _chatAdminSentRecently.findIndex(s =>
+        s.texto === m.texto && Math.abs(s.ts - new Date(m.timestamp).getTime()) < 25000
+      );
+      if (idx !== -1) {
+        _chatAdminSentRecently.splice(idx, 1);
+        _chatAdminUltimoTs = m.timestamp;
+        return;
+      }
+    }
     const ts = new Date(m.timestamp);
     const tsStr = ts.toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit" });
     const esMio = String(m.operador || "").toLowerCase() === yo;
     const div = document.createElement("div");
     div.className = "chat-admin-msg " + (esMio ? "mio" : "otro");
     div.innerHTML = `
-      <div class="meta">${esMio ? "Vos (admin)" : (escape(m.operador) + (m.pc ? " · " + escape(m.pc) : ""))} · ${tsStr}</div>
+      <div class="meta">${esMio ? "Vos (admin)" : (escape(m.operador) + (m.pc ? " · " + escape(m.pc) : ""))} · ${tsStr}${esMio ? ' <span id="chk-'+m.timestamp+'" style="font-size:11px;color:#64b5f6">✓✓</span>' : ""}</div>
       <div style="color:#ddd;font-size:13px">${escape(m.texto)}</div>`;
     box.appendChild(div);
     _chatAdminUltimoTs = m.timestamp;
+    huboNuevos = true;
   });
-  if (r.mensajes.length) box.scrollTop = box.scrollHeight;
+  if (huboNuevos) box.scrollTop = box.scrollHeight;
 }
 
 async function chatAdminEnviar() {
+  if (_chatAdminEnviando) return;
   const input = document.getElementById("chatAdminInput");
   const texto = input ? input.value.trim() : "";
   if (!texto || !admin) return;
+
+  _chatAdminEnviando = true;
   input.value = "";
   input.disabled = true;
+
+  // Render optimista
+  const box = document.getElementById("chatAdminMensajes");
+  const tsStr = new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+  const div = document.createElement("div");
+  div.className = "chat-admin-msg mio";
+  div.innerHTML = `
+    <div class="meta">Vos (admin) · ${tsStr} <span class="chat-check-admin">⏱</span></div>
+    <div style="color:#ddd;font-size:13px">${escape(texto)}</div>`;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+
+  _chatAdminSentRecently.push({ texto, ts: Date.now() });
+
   const r = await api({ action: "enviarmensaje", nombre: admin.nombre, pc: "Admin", turno: "", nota: texto });
   input.disabled = false;
-  if (r.ok) chatAdminCargar(true);
-  else input.value = texto;
+  _chatAdminEnviando = false;
+
+  const check = div.querySelector(".chat-check-admin");
+  if (r.ok) {
+    if (check) check.textContent = "✓";
+    setTimeout(() => { if (check) { check.textContent = "✓✓"; check.style.color = "#4fc3f7"; } }, 1800);
+  } else {
+    if (check) check.innerHTML = '<span style="color:#d93025">✗</span>';
+    input.value = texto;
+    _chatAdminSentRecently.pop();
+  }
 }
 
 // =========== INIT ===========
