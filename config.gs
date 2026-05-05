@@ -898,9 +898,9 @@ function getTelefonosPC_(datos) {
     .filter(t => esSi_(t['Activo en sistema']))
     .filter(t => String(t.PC || '').trim().toLowerCase() === pcFiltro)
     .map(t => ({
-      linea: t.Linea,
-      tipo: t.Tipo,
-      numero: t.Notas
+      linea: t.Linea || t.Línea || '',
+      tipo:  t.Tipo  || '',
+      numero: t['Numeros'] || t['Números'] || t['Numero'] || t['Número'] || t['Notas'] || ''
     }));
 
   return { ok: true, telefonos };
