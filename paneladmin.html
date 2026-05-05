@@ -98,6 +98,22 @@
   label { display:block; font-size:12px; color:#aaa; margin:8px 0 2px; }
 
   .empty-state { padding:30px; text-align:center; color:#888; background:#1a1a1a; border-radius:10px; }
+
+  @keyframes ctrlShimmer {
+    0%   { background-position: -200% center; }
+    100% { background-position:  200% center; }
+  }
+  @keyframes ctrlOkPop { 0%{transform:scale(1)} 40%{transform:scale(1.05)} 100%{transform:scale(1)} }
+  .btn-syncing {
+    background-image: linear-gradient(90deg,
+      rgba(255,255,255,0) 0%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0) 100%
+    ) !important;
+    background-size: 200% 100% !important;
+    animation: ctrlShimmer 1.1s ease infinite !important;
+    cursor: wait !important;
+    pointer-events: none;
+  }
+  .btn-ok-pop { animation: ctrlOkPop 0.35s ease; }
   .stat { display:inline-block; margin-right:14px; }
   .stat .stat-num { font-size:24px; font-weight:bold; }
   .stat .stat-label { font-size:11px; color:#aaa; text-transform:uppercase; }
@@ -489,6 +505,28 @@ function _cancelarImagen(textareaId, previewId) {
   if (preview) preview.innerHTML = "";
 }
 
+function _animBtn(btn, textoEspera) {
+  if (!btn) return () => {};
+  const orig = { html: btn.innerHTML, bg: btn.style.background, color: btn.style.color, cls: btn.className };
+  btn.innerHTML = textoEspera;
+  btn.disabled = true;
+  btn.classList.add("btn-syncing");
+  return function(ok, textoResultado) {
+    btn.classList.remove("btn-syncing");
+    btn.innerHTML = textoResultado || (ok ? "✓" : "✗");
+    btn.style.background = ok ? "#16a765" : "#d93025";
+    btn.style.color = "#fff";
+    btn.disabled = false;
+    btn.classList.add("btn-ok-pop");
+    setTimeout(() => {
+      btn.innerHTML = orig.html;
+      btn.className = orig.cls;
+      btn.style.background = orig.bg;
+      btn.style.color = orig.color;
+    }, ok ? 1400 : 2200);
+  };
+}
+
 function setMsg(id, msg, ok) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -698,7 +736,7 @@ async function cargarPCs() {
             <option value="TT" ${rot.turnoHoy==='TT'?'selected':''}>TT</option>
             <option value="TN" ${rot.turnoHoy==='TN'?'selected':''}>TN</option>
           </select>
-          <button class="btn-sm success" onclick="ajustarTurnoHoy()">Aplicar</button>
+          <button class="btn-sm success" onclick="ajustarTurnoHoy(this)">Aplicar</button>
           <span id="turnoHoyMsg" style="font-size:12px;color:#888"></span>
         </div>
       </div>`;
@@ -721,15 +759,20 @@ async function cargarPCs() {
     </table>` + rotHtml;
 }
 
-async function ajustarTurnoHoy() {
+async function ajustarTurnoHoy(btn) {
   const turno = document.getElementById("turnoHoySelect").value;
   const msg = document.getElementById("turnoHoyMsg");
-  msg.textContent = "Guardando...";
+  const confirmar = _animBtn(btn, "⏳ Aplicando...");
+  msg.textContent = "";
   const r = await api({ action: "setturnooffset", turno });
   if (r.ok) {
-    msg.textContent = "✓ Guardado — " + turno + " limpia hoy";
-    setTimeout(() => cargarPCs(), 800);
+    confirmar(true, "✓ Guardado");
+    msg.style.color = "#3eb368";
+    msg.textContent = turno + " limpia hoy";
+    setTimeout(() => cargarPCs(), 900);
   } else {
+    confirmar(false, "✗ Error");
+    msg.style.color = "#d93025";
     msg.textContent = r.error || "Error";
   }
 }
@@ -869,8 +912,8 @@ function renderOperadores() {
           <td class="actions">
             <button class="btn-sm secondary" onclick="modalEditarOperador('${escape(o.Nombre)}')">Editar</button>
             <button class="btn-sm warning" onclick="modalResetPin('${escape(o.Nombre)}')">PIN</button>
-            <button class="btn-sm ${act?'secondary':'success'}" onclick="toggleActivoOperador('${escape(o.Nombre)}', ${!act})">${act?'Desactivar':'Activar'}</button>
-            <button class="btn-sm danger" onclick="eliminarOperador('${escape(o.Nombre)}')">×</button>
+            <button class="btn-sm ${act?'secondary':'success'}" onclick="toggleActivoOperador('${escape(o.Nombre)}', ${!act}, this)">${act?'Desactivar':'Activar'}</button>
+            <button class="btn-sm danger" onclick="eliminarOperador('${escape(o.Nombre)}', this)">×</button>
           </td>
         </tr>`;
       }).join("")}</tbody>
@@ -917,17 +960,21 @@ function modalResetPin(nombre) {
   }});
 }
 
-async function toggleActivoOperador(nombre, activar) {
+async function toggleActivoOperador(nombre, activar, btn) {
+  const confirmar = _animBtn(btn, activar ? "⏳ Activando..." : "⏳ Desactivando...");
   const r = await api({ action: "setactivoperador", nombre, activo: activar ? "Sí" : "No" });
-  if (!r.ok) return alert(r.error);
-  cargarOperadores();
+  if (!r.ok) { confirmar(false, "✗ Error"); return alert(r.error); }
+  confirmar(true, activar ? "✓ Activo" : "✓ Inactivo");
+  setTimeout(() => cargarOperadores(), 900);
 }
 
-async function eliminarOperador(nombre) {
+async function eliminarOperador(nombre, btn) {
   if (!confirm("¿Eliminar operador " + nombre + " definitivamente? Mejor desactivarlo si tiene historial.")) return;
+  const confirmar = _animBtn(btn, "🗑 Eliminando...");
   const r = await api({ action: "eliminaroperador", nombre });
-  if (!r.ok) return alert(r.error);
-  cargarOperadores();
+  if (!r.ok) { confirmar(false, "✗ Error"); return alert(r.error); }
+  confirmar(true, "✓ Eliminado");
+  setTimeout(() => cargarOperadores(), 700);
 }
 
 // =========== TELÉFONOS ===========
@@ -1179,9 +1226,9 @@ async function cargarNovedades() {
           <td class="actions">
             <button class="btn-sm" onclick="abrirThreadComentarios('${escape(n.id)}')">💬</button>
             <button class="btn-sm secondary" onclick="modalEditarNovedad(${i})">Editar</button>
-            <button class="btn-sm warning" onclick="cambiarEstadoNovedad('${escape(n.id)}', 'En seguimiento')">Seguimiento</button>
-            <button class="btn-sm success" onclick="cambiarEstadoNovedad('${escape(n.id)}', 'Resuelta')">Resolver</button>
-            <button class="btn-sm danger" onclick="eliminarNovedad('${escape(n.id)}')">×</button>
+            <button class="btn-sm warning" onclick="cambiarEstadoNovedad('${escape(n.id)}', 'En seguimiento', this)">Seguimiento</button>
+            <button class="btn-sm success" onclick="cambiarEstadoNovedad('${escape(n.id)}', 'Resuelta', this)">Resolver</button>
+            <button class="btn-sm danger" onclick="eliminarNovedad('${escape(n.id)}', this)">×</button>
           </td>
         </tr>`).join("")}</tbody>
     </table>`;
@@ -1211,18 +1258,22 @@ function modalEditarNovedad(idx) {
   }});
 }
 
-async function cambiarEstadoNovedad(id, estado) {
+async function cambiarEstadoNovedad(id, estado, btn) {
   const resolucion = prompt("Resolución / nota (opcional):") || "";
+  const confirmar = _animBtn(btn, estado === "Resuelta" ? "✏️ Resolviendo..." : "✏️ Actualizando...");
   const r = await api({ action: "actualizarnovedad", id, estado, resolucion });
-  if (!r.ok) return alert(r.error);
-  cargarNovedades();
+  if (!r.ok) { confirmar(false, "✗ Error"); return alert(r.error); }
+  confirmar(true, estado === "Resuelta" ? "✓ Resuelta" : "✓ Seguimiento");
+  setTimeout(() => cargarNovedades(), 900);
 }
 
-async function eliminarNovedad(id) {
+async function eliminarNovedad(id, btn) {
   if (!confirm("¿Eliminar novedad?")) return;
+  const confirmar = _animBtn(btn, "🗑 Eliminando...");
   const r = await api({ action: "eliminarnovedad", id });
-  if (!r.ok) return alert(r.error);
-  cargarNovedades();
+  if (!r.ok) { confirmar(false, "✗ Error"); return alert(r.error); }
+  confirmar(true, "✓ Eliminada");
+  setTimeout(() => cargarNovedades(), 700);
 }
 
 // =========== HISTÓRICO ===========
@@ -1741,20 +1792,43 @@ function abrirModal({ titulo, campos, onSave, html, soloLectura }) {
         <h3>${escape(titulo)}</h3>
         ${cuerpo}
         <div class="row-buttons">
-          ${soloLectura ? '' : '<button class="success" onclick="_modalSave()">Guardar</button>'}
+          ${soloLectura ? '' : '<button class="success" id="modalSaveBtn" onclick="_modalSave(this)">Guardar</button>'}
           <button class="secondary" onclick="cerrarModal()">${soloLectura?'Cerrar':'Cancelar'}</button>
         </div>
       </div>
     </div>`;
 
-  window._modalSave = async () => {
+  window._modalSave = async (btn) => {
     if (!campos) return cerrarModal();
     const vals = {};
     campos.forEach(c => {
       const el = document.getElementById("modal-" + c.id);
       if (el) vals[c.id] = el.value;
     });
-    if (onSave) await onSave(vals);
+    if (!onSave) return cerrarModal();
+
+    const confirmar = _animBtn(btn, "📝 Guardando...");
+    let llamoCerrar = false;
+
+    // Si onSave llama cerrarModal() → éxito; si no lo llama → error
+    const _origCerrar = window.cerrarModal;
+    window.cerrarModal = function() {
+      llamoCerrar = true;
+      confirmar(true, "✓ Guardado");
+      window.cerrarModal = _origCerrar;
+      setTimeout(_origCerrar, 700);
+    };
+
+    try {
+      await onSave(vals);
+      if (!llamoCerrar) {
+        confirmar(false, "✗ Error");
+        window.cerrarModal = _origCerrar;
+      }
+    } catch (e) {
+      confirmar(false, "✗ Error");
+      window.cerrarModal = _origCerrar;
+    }
   };
 }
 
