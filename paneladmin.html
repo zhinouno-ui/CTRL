@@ -157,6 +157,7 @@
       <button data-section="recepciones" onclick="cambiarSeccion('recepciones')">🤝 Recepciones</button>
       <button data-section="pausas"      onclick="cambiarSeccion('pausas')">⏸️ Pausas</button>
       <button data-section="notas"       onclick="cambiarSeccion('notas')">📝 Notas turno</button>
+      <button data-section="logtel"      onclick="cambiarSeccion('logtel')">📵 Log teléfonos</button>
       <button data-section="historial"   onclick="cambiarSeccion('historial')">📋 Fichajes</button>
     </nav>
     <button class="secondary logout-btn" onclick="logoutAdmin()">Cerrar sesión</button>
@@ -300,6 +301,20 @@
         </div>
       </div>
       <div id="notasBox"></div>
+    </section>
+
+    <!-- LOG DE TELÉFONOS GLOBAL -->
+    <section id="section-logtel" class="section">
+      <h2 class="section-title">📵 Log de teléfonos</h2>
+      <div class="filter-bar">
+        <div class="row">
+          <select id="filterLogTelPC" onchange="cargarLogTel()"><option value="">PC: todas</option></select>
+          <input id="filterLogTelLinea" placeholder="Línea" onchange="cargarLogTel()" />
+          <input id="filterLogTelDesde" type="date" onchange="cargarLogTel()" />
+          <input id="filterLogTelHasta" type="date" onchange="cargarLogTel()" />
+        </div>
+      </div>
+      <div id="logTelBox"></div>
     </section>
 
     <!-- HISTÓRICO FICHAJES -->
@@ -547,6 +562,7 @@ function cambiarSeccion(seccion) {
   if (seccion === "recepciones") cargarRecepciones();
   if (seccion === "pausas")      cargarPausas();
   if (seccion === "notas")       cargarNotas();
+  if (seccion === "logtel")      cargarLogTel();
   if (seccion === "historial")   cargarHistorial();
 }
 
@@ -557,7 +573,7 @@ async function cargarPCsCache() {
   if (!r.ok) return;
   _pcsCache = r.pcs || [];
   ["filterOpPC","filterTelPC","filterTareaPC","filterNovPC","filterHistPC",
-   "filterRecPC","filterPausaPC","filterNotaPC"].forEach(id => {
+   "filterRecPC","filterPausaPC","filterNotaPC","filterLogTelPC"].forEach(id => {
     const sel = document.getElementById(id);
     if (!sel) return;
     const current = sel.value;
@@ -1233,6 +1249,64 @@ async function cargarNotas() {
           <td><b>${escape(n.pc)}</b></td>
           <td>${escape(n.operador)}</td>
           <td style="white-space:pre-wrap">${escape(n.nota)}</td>
+        </tr>`).join("")}</tbody>
+    </table>`;
+}
+
+// =========== LOG TELÉFONOS GLOBAL ===========
+
+async function cargarLogTel() {
+  const box = document.getElementById("logTelBox");
+  box.innerHTML = '<div class="empty-state">Cargando...</div>';
+  const pc = document.getElementById("filterLogTelPC").value;
+  const linea = document.getElementById("filterLogTelLinea").value.trim();
+  const desde = document.getElementById("filterLogTelDesde").value;
+  const hasta = document.getElementById("filterLogTelHasta").value;
+  const r = await api({ action: "getlogtelefonosadmin", pc, linea, desde, hasta });
+  if (!r.ok) { box.innerHTML = '<div class="empty-state">Error.</div>'; return; }
+
+  const all = r.log || [];
+  const abiertas = all.filter(e => e.estado === "Abierta").length;
+  const cerradas = all.length - abiertas;
+  const minsCerr = all.filter(e => e.estado !== "Abierta" && Number(e.duracion)).map(e => Number(e.duracion));
+  const promedio = _promedio(minsCerr);
+
+  const statsHtml = _statsHtml([
+    { num: all.length, label: "Total caídas", color: "gray" },
+    { num: abiertas, label: "Abiertas ahora", color: abiertas>0?"red":"green" },
+    { num: cerradas, label: "Cerradas", color: "" },
+    { num: promedio + " min", label: "Duración promedio", color: promedio>30?"red":(promedio>10?"yellow":"green") }
+  ]);
+
+  const porLinea = _agruparContar(all, e => e.linea);
+  const porPC = _agruparContar(all, e => e.pc);
+  const charts = `
+    <div class="grid cols-2">
+      ${_barChartHtml("Por línea", porLinea)}
+      ${_barChartHtml("Por PC", porPC)}
+    </div>`;
+
+  if (!all.length) { box.innerHTML = statsHtml + '<div class="empty-state">Sin caídas registradas.</div>'; return; }
+
+  box.innerHTML = statsHtml + charts + `
+    <table>
+      <thead><tr>
+        <th>Fecha</th><th>PC</th><th>Línea</th>
+        <th>Caída</th><th>Operador</th><th>Motivo</th>
+        <th>Levantado</th><th>Duración</th><th>Por</th><th>Estado</th>
+      </tr></thead>
+      <tbody>${all.map(e => `
+        <tr>
+          <td>${escape(fmtFecha(e.timestamp))}</td>
+          <td><b>${escape(e.pc)}</b></td>
+          <td>${escape(e.linea)}</td>
+          <td>${escape(fmtHora(e.horaCaida))}</td>
+          <td>${escape(e.operadorCaida)}</td>
+          <td>${escape(e.motivo || '')}</td>
+          <td>${escape(fmtHora(e.horaLevantado))}</td>
+          <td>${e.duracion ? e.duracion + ' min' : ''}</td>
+          <td>${escape(e.operadorLevanta || '')}</td>
+          <td><span class="badge ${e.estado==='Cerrada'?'green':'red'}">${escape(e.estado)}</span></td>
         </tr>`).join("")}</tbody>
     </table>`;
 }

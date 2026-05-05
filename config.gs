@@ -8,7 +8,9 @@ const HOJAS = {
   FUMAR: 'FUMAR_PAUSAS',
   LIMPIEZA: 'LIMPIEZA_PAUSAS',
   NOVEDADES: 'ERRORES_NOVEDADES',
-  TAREAS: 'TAREAS_PC'
+  TAREAS: 'TAREAS_PC',
+  COMENTARIOS: 'NOVEDADES_COMENTARIOS',
+  NOTAS_TURNO: 'NOTAS_TURNO'
 };
 
 const TURNOS_CONFIG = {
@@ -65,6 +67,15 @@ function manejarAccion_(datos) {
   if (datos.action === 'telefonolevantado') return json_(telefonoLevantado_(datos));
   if (datos.action === 'getlogtelefono') return json_(getLogTelefono_(datos));
   if (datos.action === 'notarnovedad') return json_(notarNovedad_(datos));
+  if (datos.action === 'getpoll') return json_(getPoll_(datos));
+  if (datos.action === 'getmisnovedades') return json_(getMisNovedades_(datos));
+  if (datos.action === 'getcomentariosnovedad') return json_(getComentariosNovedad_(datos));
+  if (datos.action === 'agregarcomentario') return json_(agregarComentario_(datos));
+  if (datos.action === 'editarcomentario') return json_(editarComentario_(datos));
+  if (datos.action === 'eliminarcomentario') return json_(eliminarComentario_(datos));
+  if (datos.action === 'guardarnotaturno') return json_(guardarNotaTurno_(datos));
+  if (datos.action === 'getnotaturnoanterior') return json_(getNotaTurnoAnterior_(datos));
+  if (datos.action === 'getnotasturno') return json_(adminGuard_(datos, getNotasTurno_));
 
   // === ADMIN ===
   if (datos.action === 'loginadmin') return json_(loginAdmin_(datos));
@@ -155,6 +166,7 @@ function normalizarDatos_(data) {
     operador: data.operador || '',
     tipoPausa: data.tipoPausa || '',
     limit: parseInt(data.limit || 200),
+    imagenBase64: data.imagenBase64 || '',
 
     id: data.id || '',
     estado: data.estado || '',
@@ -1008,6 +1020,44 @@ function verificarActivo_(datos) {
   return { ok: true, activo: esSi_(op.Activo) };
 }
 
+// --- POLL CONSOLIDADO (1 fetch en lugar de 3) ---
+function getPoll_(datos) {
+  const tareasResp = getTareasPC_({ pc: datos.pc });
+  const activoResp = verificarActivo_({ nombre: datos.nombre });
+  const novResp    = getNovedadesPendientes_({ pc: datos.pc });
+  const misResp    = getMisNovedades_({ nombre: datos.nombre });
+
+  return {
+    ok: true,
+    activo: activoResp.activo,
+    novedades: novResp.novedades || [],
+    tareas: tareasResp.tareas || [],
+    ultimaCompletada: tareasResp.ultimaCompletada || null,
+    misNovedades: misResp.novedades || []
+  };
+}
+
+// --- HISTORIAL DE NOVEDADES PROPIAS DEL OPERADOR ---
+function getMisNovedades_(datos) {
+  const sh = hoja_(HOJAS.NOVEDADES);
+  const v = sh.getDataRange().getValues();
+  const nombreF = String(datos.nombre || '').trim().toLowerCase();
+  if (!nombreF) return { ok: true, novedades: [] };
+
+  const out = [];
+  for (let i = v.length - 1; i >= 3; i--) {
+    if (!v[i][10]) continue;
+    if (String(v[i][2] || '').trim().toLowerCase() !== nombreF) continue;
+    out.push({
+      timestamp: v[i][0], fecha: v[i][1], operador: v[i][2], turno: v[i][3], pc: v[i][4],
+      tipo: v[i][5], prioridad: v[i][6], detalle: v[i][7], resuelto: v[i][8],
+      observaciones: v[i][9], id: v[i][10], estado: v[i][11], revisadoPor: v[i][12], resolucion: v[i][13]
+    });
+    if (out.length >= 30) break;
+  }
+  return { ok: true, cantidad: out.length, novedades: out };
+}
+
 // --- TAREAS DE SUPERVISOR ---
 
 function inicializarTareasPC_() {
@@ -1743,4 +1793,188 @@ function getLogTelefonosAdmin_(datos) {
     if (log.length >= limit) break;
   }
   return { ok: true, cantidad: log.length, log };
+}
+
+// ===========================
+// === COMENTARIOS NOVEDAD ===
+// ===========================
+
+function inicializarComentarios_() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(HOJAS.COMENTARIOS);
+  if (!sh) sh = ss.insertSheet(HOJAS.COMENTARIOS);
+  if (String(sh.getRange(3, 1).getValue()).toLowerCase() === 'timestamp') {
+    // Si ya existe pero falta col ImagenURL, la agregamos
+    if (String(sh.getRange(3, 7).getValue()).toLowerCase() !== 'imagenurl') {
+      sh.getRange(3, 7).setValue('ImagenURL');
+    }
+    return sh;
+  }
+  if (sh.getLastRow() < 1) sh.getRange(1, 1).setValue('NOVEDADES_COMENTARIOS');
+  sh.getRange(3, 1, 1, 7).setValues([[
+    'Timestamp', 'IdNovedad', 'Autor', 'Texto', 'Editado', 'Eliminado', 'ImagenURL'
+  ]]);
+  return sh;
+}
+
+// === DRIVE: carpeta auto-setup para imágenes de novedades ===
+function _getDriveFolderId_() {
+  const props = PropertiesService.getScriptProperties();
+  let id = props.getProperty('NOVEDADES_FOLDER_ID');
+  if (id) {
+    try { DriveApp.getFolderById(id); return id; }
+    catch (e) { /* folder borrado, recreamos */ }
+  }
+  const folder = DriveApp.createFolder('CTRL_NOVEDADES_IMAGENES');
+  try { folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+  id = folder.getId();
+  props.setProperty('NOVEDADES_FOLDER_ID', id);
+  return id;
+}
+
+function _subirImagenBase64_(base64DataUrl, nombreArchivo) {
+  const match = String(base64DataUrl || '').match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) throw new Error('Formato base64 inválido');
+  const mime = match[1];
+  const data = Utilities.base64Decode(match[2]);
+  const blob = Utilities.newBlob(data, mime, nombreArchivo || 'imagen_' + Date.now());
+  const folderId = _getDriveFolderId_();
+  const file = DriveApp.getFolderById(folderId).createFile(blob);
+  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+  return 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1200';
+}
+
+function getComentariosNovedad_(datos) {
+  const idF = String(datos.id || '').trim();
+  if (!idF) return { ok: true, comentarios: [] };
+  let sh; try { sh = inicializarComentarios_(); } catch (e) { return { ok: true, comentarios: [] }; }
+  const v = sh.getDataRange().getValues();
+  const out = [];
+  for (let i = 3; i < v.length; i++) {
+    if (!v[i][0]) continue;
+    if (String(v[i][1] || '').trim() !== idF) continue;
+    if (v[i][5]) continue;
+    out.push({
+      fila: i + 1,
+      timestamp: v[i][0],
+      idNovedad: v[i][1],
+      autor: v[i][2],
+      texto: v[i][3],
+      editado: v[i][4],
+      imagenURL: v[i][6] || ''
+    });
+  }
+  return { ok: true, comentarios: out };
+}
+
+function agregarComentario_(datos) {
+  const idF = String(datos.id || '').trim();
+  const autor = String(datos.nombre || '').trim();
+  const texto = String(datos.nota || datos.detalle || '').trim();
+  const imagenBase64 = String(datos.imagenBase64 || '').trim();
+  if (!idF || !autor) return { ok: false, error: 'Falta novedad o autor.' };
+  if (!texto && !imagenBase64) return { ok: false, error: 'Comentario vacío.' };
+
+  let imagenURL = '';
+  if (imagenBase64) {
+    try {
+      imagenURL = _subirImagenBase64_(imagenBase64, 'novedad_' + idF + '_' + Date.now());
+    } catch (e) {
+      return { ok: false, error: 'Error subiendo imagen: ' + e.message };
+    }
+  }
+
+  const sh = inicializarComentarios_();
+  sh.appendRow([new Date(), idF, autor, texto, '', '', imagenURL]);
+  SpreadsheetApp.flush();
+  return { ok: true, imagenURL };
+}
+
+function editarComentario_(datos) {
+  const fila = parseInt(datos.fila || '0');
+  const autor = String(datos.nombre || '').trim().toLowerCase();
+  const texto = String(datos.nota || datos.detalle || '').trim();
+  if (!fila || fila < 4 || !texto) return { ok: false, error: 'Datos inválidos.' };
+  const sh = inicializarComentarios_();
+  const filaAutor = String(sh.getRange(fila, 3).getValue() || '').trim().toLowerCase();
+  if (filaAutor !== autor && !esAdmin_(datos.nombre)) return { ok: false, error: 'Solo el autor puede editar.' };
+  sh.getRange(fila, 4).setValue(texto);
+  sh.getRange(fila, 5).setValue('Sí ' + hora_(new Date()));
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+function eliminarComentario_(datos) {
+  const fila = parseInt(datos.fila || '0');
+  const autor = String(datos.nombre || '').trim().toLowerCase();
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  const sh = inicializarComentarios_();
+  const filaAutor = String(sh.getRange(fila, 3).getValue() || '').trim().toLowerCase();
+  if (filaAutor !== autor && !esAdmin_(datos.nombre)) return { ok: false, error: 'Solo el autor puede eliminar.' };
+  sh.getRange(fila, 6).setValue('Sí');
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+// ===========================
+// ===== NOTAS DE TURNO ======
+// ===========================
+
+function inicializarNotasTurno_() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(HOJAS.NOTAS_TURNO);
+  if (!sh) sh = ss.insertSheet(HOJAS.NOTAS_TURNO);
+  if (String(sh.getRange(3, 1).getValue()).toLowerCase() === 'timestamp') return sh;
+  if (sh.getLastRow() < 1) sh.getRange(1, 1).setValue('NOTAS_TURNO');
+  sh.getRange(3, 1, 1, 6).setValues([[
+    'Timestamp', 'Fecha', 'Turno', 'PC', 'Operador', 'Nota'
+  ]]);
+  return sh;
+}
+
+function guardarNotaTurno_(datos) {
+  const op = getOperador_(datos.nombre);
+  if (!op) return { ok: false, error: 'Operador no encontrado.' };
+  const texto = String(datos.nota || '').trim();
+  if (!texto) return { ok: false, error: 'Falta texto de la nota.' };
+  const sh = inicializarNotasTurno_();
+  const ahora = new Date();
+  sh.appendRow([new Date(), fecha_(ahora), op.Turno, datos.pc || op.PC, op.Nombre, texto]);
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+function getNotaTurnoAnterior_(datos) {
+  const pcF = String(datos.pc || '').trim().toLowerCase();
+  if (!pcF) return { ok: true, notas: [] };
+  let sh; try { sh = inicializarNotasTurno_(); } catch (e) { return { ok: true, notas: [] }; }
+  const v = sh.getDataRange().getValues();
+  const out = [];
+  for (let i = v.length - 1; i >= 3 && out.length < 5; i--) {
+    if (!v[i][3]) continue;
+    if (String(v[i][3] || '').trim().toLowerCase() !== pcF) continue;
+    out.push({
+      timestamp: v[i][0], fecha: v[i][1], turno: v[i][2], pc: v[i][3], operador: v[i][4], nota: v[i][5]
+    });
+  }
+  return { ok: true, notas: out };
+}
+
+function getNotasTurno_(datos) {
+  const pcF = String(datos.pc || '').trim().toLowerCase();
+  const opF = String(datos.operador || '').trim().toLowerCase();
+  const limit = datos.limit || 200;
+  let sh; try { sh = inicializarNotasTurno_(); } catch (e) { return { ok: true, notas: [] }; }
+  const v = sh.getDataRange().getValues();
+  const out = [];
+  for (let i = v.length - 1; i >= 3 && out.length < limit; i--) {
+    if (!v[i][0]) continue;
+    if (pcF && String(v[i][3] || '').trim().toLowerCase() !== pcF) continue;
+    if (opF && String(v[i][4] || '').trim().toLowerCase() !== opF) continue;
+    if (!_enRango_(v[i][0], datos.desde, datos.hasta)) continue;
+    out.push({
+      timestamp: v[i][0], fecha: v[i][1], turno: v[i][2], pc: v[i][3], operador: v[i][4], nota: v[i][5]
+    });
+  }
+  return { ok: true, cantidad: out.length, notas: out };
 }
