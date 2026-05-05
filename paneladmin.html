@@ -967,15 +967,17 @@ function renderTelefonos() {
 }
 
 function modalNuevoTelefono() {
+  // Construir opciones de PC a partir del cache de PCs
+  const pcOpciones = (_pcsCache || []).map(p => p.PC || p.pc || '').filter(x => x);
   abrirModal({ titulo: "Nuevo teléfono", campos: [
     { id: "linea", label: "Línea (ej: Principal 1)" },
     { id: "tipo", label: "Tipo", type: "select", opciones: ["Principal", "Soporte"] },
-    { id: "pc", label: "PC" },
+    { id: "pc", label: "PC", type: "select", opciones: pcOpciones },
     { id: "activoEnSistema", label: "En servicio", type: "select", opciones: ["Sí", "No"] },
     { id: "numero", label: "Número" }
   ], onSave: async (vals) => {
     const r = await api({ action: "creartelefono", estadoEsperado: "Activo", ...vals });
-    if (!r.ok) return alert(r.error);
+    if (!r.ok) return alert(r.error || JSON.stringify(r));
     cerrarModal(); cargarTelefonos();
   }});
 }
