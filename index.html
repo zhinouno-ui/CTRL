@@ -230,6 +230,8 @@
     .chat-msg.otro { align-self:flex-start; background:#2c2c2c; border-bottom-left-radius:2px; }
     .chat-msg .meta { font-size:11px; color:#888; margin-bottom:3px; }
     .chat-msg .texto { color:#ddd; }
+    .chat-check { font-size:11px; margin-left:4px; color:#64b5f6; transition:color 0.3s; }
+    .chat-check.sent2 { color:#4fc3f7; }
 
     @keyframes slideIn {
       from { transform: translateX(100%); opacity: 0; }
@@ -1170,7 +1172,7 @@
   }
 
   function horaActual_() {
-    return new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return new Date().toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
 
   function toggleDiferenciaCaja() {
@@ -1468,7 +1470,7 @@
     r.mensajes.forEach(m => {
       if (!m.timestamp) return;
       const ts = new Date(m.timestamp);
-      const tsStr = ts.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+      const tsStr = ts.toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit" });
       const esMio = m.operador.toLowerCase() === yoBajo;
       const div = document.createElement("div");
       div.className = "chat-msg " + (esMio ? "mio" : "otro");
@@ -1537,7 +1539,7 @@
     const yo = (operador && operador.nombre || "").toLowerCase();
     lista.innerHTML = r.comentarios.map(c => {
       const esMio = String(c.autor || "").toLowerCase() === yo;
-      const ts = c.timestamp ? new Date(c.timestamp).toLocaleString("es-AR", {hour12:false}) : "";
+      const ts = c.timestamp ? new Date(c.timestamp).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour12:false }) : "";
       const editado = c.editado ? `<span class="small" style="color:#888"> (editado)</span>` : "";
       const imagen = c.imagenURL ? `
         <a href="${c.imagenURL}" target="_blank" rel="noopener">
