@@ -2294,17 +2294,20 @@ function getLimpiezaSemana_() {
   const r = getPCs_();
   if (!r.pcs.length) return { ok: true, dias: [] };
   const n = r.pcs.length;
+  const turnos = ['TM', 'TT', 'TN'];
   const ahora = new Date();
   const diasSemana = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   const dias = [];
   for (let offset = -1; offset < 13; offset++) {
     const d = new Date(Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() + offset));
     const diaIdx = Math.floor(d.getTime() / (24 * 3600 * 1000));
-    const pcIdx = ((diaIdx % n) + n) % n;
+    const pcIdx    = ((diaIdx % n) + n) % n;
+    const turnoIdx = ((diaIdx % 3) + 3) % 3;
     dias.push({
       fecha: fecha_(d),
       diaSemana: diasSemana[d.getUTCDay()],
       pc: r.pcs[pcIdx].pc,
+      turno: turnos[turnoIdx],
       esHoy: offset === 0
     });
   }

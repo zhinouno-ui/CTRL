@@ -663,27 +663,28 @@ async function cargarPCs() {
   const box = document.getElementById("pcsBox");
   if (!_pcsCache.length) { box.innerHTML = '<div class="empty-state">No hay PCs configuradas.</div>'; return; }
 
-  // Tabla de rotación semanal
+  // Tabla de rotación semanal (va DEBAJO de la lista de PCs)
   const rot = await api({ action: "getlimpiezasemana" });
   let rotHtml = "";
   if (rot.ok && rot.dias.length) {
     rotHtml = `
-      <div style="margin-bottom:20px">
+      <div style="margin-top:24px">
         <h3 style="margin:0 0 10px;font-size:14px;color:#bbb;text-transform:uppercase;letter-spacing:0.5px">🗓️ Rotación de limpieza (14 días)</h3>
         <table class="rotacion-tabla" style="width:100%;border-collapse:collapse;background:#111;border-radius:10px;overflow:hidden">
-          <thead><tr style="background:#1a1a1a"><th>Día</th><th>Fecha</th><th>PC que limpia</th></tr></thead>
+          <thead><tr style="background:#1a1a1a"><th>Día</th><th>Fecha</th><th>PC</th><th>Turno</th></tr></thead>
           <tbody>${rot.dias.map(d => `
             <tr class="${d.esHoy ? "hoy" : ""}">
               <td>${escape(d.diaSemana)}</td>
               <td>${escape(d.fecha)}</td>
               <td class="pc-limpiar">${escape(d.pc)}${d.esHoy ? " ← HOY" : ""}</td>
+              <td><span class="badge ${d.turno==='TM'?'green':(d.turno==='TT'?'yellow':'blue')}">${escape(d.turno)}</span></td>
             </tr>`).join("")}
           </tbody>
         </table>
       </div>`;
   }
 
-  box.innerHTML = rotHtml + `
+  box.innerHTML = `
     <table>
       <thead><tr><th>PC</th><th>Orden limpieza</th><th>Estado</th><th></th></tr></thead>
       <tbody>${_pcsCache.map(p => `
@@ -697,7 +698,7 @@ async function cargarPCs() {
           </td>
         </tr>`).join('')}
       </tbody>
-    </table>`;
+    </table>` + rotHtml;
 }
 
 function modalNuevaPC() {
