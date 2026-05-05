@@ -821,6 +821,32 @@
   // Clave de estado por índice (no por nombre) para evitar colisiones si t.linea es undefined
   function _telefKey(idx) { return "t" + idx; }
 
+  // Refresca solo el estado caído/activo de los teléfonos (sin re-renderizar toda la card)
+  async function actualizarEstadoTelefonos() {
+    const telefonos = window._telefsData || [];
+    if (!telefonos.length || !operador) return;
+    for (let idx = 0; idx < telefonos.length; idx++) {
+      const t = telefonos[idx];
+      if (!t.linea) continue;
+      const r = await api({ action: "getlogtelefono", linea: t.linea });
+      if (!r.ok || !r.log || !r.log.length) continue;
+      // La entrada más reciente determina el estado actual
+      const ultima = r.log[0];
+      const estaCaido = ultima.estado === "Abierta";
+      const key = _telefKey(idx);
+      const estado = _telefsCargarEstado();
+      if (!estado[key]) estado[key] = {};
+      const cambia = (!!estado[key].caido) !== estaCaido;
+      estado[key].caido = estaCaido;
+      _telefsPersistir(estado);
+      if (cambia) {
+        // Solo re-renderiza si cambió el estado para no interrumpir interacciones activas
+        renderTelefonos();
+        break; // renderTelefonos redibuja todos, no hace falta seguir el loop
+      }
+    }
+  }
+
   function renderTelefonos() {
     const box = document.getElementById("telefonosBox");
     const estado = _telefsCargarEstado();
@@ -1591,6 +1617,8 @@
         cargarNovedades(r.novedades);
         cargarTareas({ tareas: r.tareas, ultimaCompletada: r.ultimaCompletada });
         cargarMisNovedades(r.misNovedades);
+        // Refrescar estado de teléfonos cada 30s para detectar caídas de otros operadores
+        actualizarEstadoTelefonos();
       }
     } catch (e) {
       _verifFails = 0;

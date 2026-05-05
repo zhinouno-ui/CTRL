@@ -1303,8 +1303,13 @@ function loginAdmin_(datos) {
 
 function getDashboard_() {
   const ahora = new Date();
+
+  // Cerrar sesiones expiradas antes de calcular el estado actual
+  cerrarSesionesExpiradas_();
+
   const pcsResp = getPCs_();
   const pcs = pcsResp.pcs || [];
+  const limiteMs = HORAS_MAX_FICHAJE * 3600 * 1000;
 
   // Última acción por operador en FICHAJES
   const fichajes = hoja_(HOJAS.FICHAJES).getDataRange().getValues();
@@ -1314,7 +1319,7 @@ function getDashboard_() {
     const nombre = fichajes[i][2];
     if (!nombre || !ts) continue;
     const key = String(nombre).trim().toLowerCase();
-    if (!ultimosPorOp[key] || ts > ultimosPorOp[key].ts) {
+    if (!ultimosPorOp[key] || (ts instanceof Date && ts > ultimosPorOp[key].ts)) {
       ultimosPorOp[key] = {
         ts, nombre,
         turno: fichajes[i][3], pc: fichajes[i][4], tipo: fichajes[i][5],
@@ -1323,20 +1328,22 @@ function getDashboard_() {
     }
   }
 
-  // PCs activas: agrupar operadores con Ingreso vigente
+  // PCs activas: solo Ingreso dentro de la ventana de 9h
   const pcsActivas = {};
   for (const k in ultimosPorOp) {
     const u = ultimosPorOp[k];
-    if (u.accion === 'Ingreso') {
-      const pcKey = String(u.pc || '').trim().toUpperCase();
-      if (!pcsActivas[pcKey]) pcsActivas[pcKey] = [];
-      pcsActivas[pcKey].push({
-        nombre: u.nombre,
-        turno: u.turno,
-        desde: u.hora,
-        minutosSesion: u.ts instanceof Date ? Math.max(0, Math.floor((ahora - u.ts) / 60000)) : 0
-      });
-    }
+    if (u.accion !== 'Ingreso') continue;
+    if (!(u.ts instanceof Date)) continue;
+    const diffMs = ahora - u.ts;
+    if (diffMs > limiteMs) continue;  // sesión expirada, ignorar
+    const pcKey = String(u.pc || '').trim().toUpperCase();
+    if (!pcsActivas[pcKey]) pcsActivas[pcKey] = [];
+    pcsActivas[pcKey].push({
+      nombre: u.nombre,
+      turno: u.turno,
+      desde: u.hora,
+      minutosSesion: Math.max(0, Math.floor(diffMs / 60000))
+    });
   }
 
   // Pausas abiertas por PC
@@ -1380,16 +1387,28 @@ function getDashboard_() {
     }
   } catch (e) {}
 
-  // Teléfonos caídos por PC desde el log
+  // Teléfonos caídos por PC: contar solo la entrada MÁS RECIENTE por línea
+  // Evita contar entradas viejas/duplicadas que quedaron como Abierta
   const telCaidosPorPC = {};
   try {
     const shTel = hoja_(HOJAS.TELEFONOS);
     const lastRow = shTel.getLastRow();
     if (lastRow >= 4) {
       const logRange = shTel.getRange(4, 8, lastRow - 3, 10).getValues();
-      for (let i = 0; i < logRange.length; i++) {
-        if (logRange[i][9] !== 'Abierta') continue;
-        const pcKey = String(logRange[i][1] || '').trim().toUpperCase();
+      // Última entrada por linea (iterando de atrás para adelante = más reciente primero)
+      const ultimoPorLinea = {};
+      for (let i = logRange.length - 1; i >= 0; i--) {
+        if (!logRange[i][0]) continue;
+        const lineaKey = String(logRange[i][2] || '').trim().toLowerCase();
+        if (!lineaKey) continue;
+        if (ultimoPorLinea[lineaKey] !== undefined) continue; // ya tenemos la más reciente
+        ultimoPorLinea[lineaKey] = { estado: logRange[i][9], pc: logRange[i][1] };
+      }
+      // Contar solo las que su última entrada sea Abierta
+      for (const lineaKey in ultimoPorLinea) {
+        const e = ultimoPorLinea[lineaKey];
+        if (e.estado !== 'Abierta') continue;
+        const pcKey = String(e.pc || '').trim().toUpperCase();
         telCaidosPorPC[pcKey] = (telCaidosPorPC[pcKey] || 0) + 1;
       }
     }
