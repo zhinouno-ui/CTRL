@@ -373,23 +373,23 @@ function fmt(val) {
   if (isNaN(d.getTime())) return String(val);
   // Artefacto de Google Sheets: fecha 1899-12-30 significa que la celda es solo hora
   if (d.getFullYear() === 1899 || d.getFullYear() === 1900) {
-    return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return d.toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
-  return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" })
-    + " " + d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", year: "numeric" })
+    + " " + d.toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit" });
 }
 function fmtFecha(val) {
   if (!val) return "";
   const d = new Date(val);
   if (isNaN(d.getTime())) return String(val);
   if (d.getFullYear() === 1899) return "";
-  return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return d.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", year: "numeric" });
 }
 function fmtHora(val) {
   if (!val) return "";
   const d = new Date(val);
   if (isNaN(d.getTime())) return String(val);
-  return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return d.toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 async function api(params) {
@@ -1780,7 +1780,7 @@ async function chatAdminCargar(silencioso) {
   const yo = (admin && admin.nombre || "").toLowerCase();
   r.mensajes.forEach(m => {
     const ts = new Date(m.timestamp);
-    const tsStr = ts.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+    const tsStr = ts.toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit" });
     const esMio = String(m.operador || "").toLowerCase() === yo;
     const div = document.createElement("div");
     div.className = "chat-admin-msg " + (esMio ? "mio" : "otro");
