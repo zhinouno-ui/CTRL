@@ -681,6 +681,16 @@ async function cargarPCs() {
             </tr>`).join("")}
           </tbody>
         </table>
+        <div style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="color:#bbb;font-size:13px">¿Qué turno limpia HOY?</span>
+          <select id="turnoHoySelect" style="width:auto;padding:6px 12px">
+            <option value="TM" ${rot.turnoHoy==='TM'?'selected':''}>TM</option>
+            <option value="TT" ${rot.turnoHoy==='TT'?'selected':''}>TT</option>
+            <option value="TN" ${rot.turnoHoy==='TN'?'selected':''}>TN</option>
+          </select>
+          <button class="btn-sm success" onclick="ajustarTurnoHoy()">Aplicar</button>
+          <span id="turnoHoyMsg" style="font-size:12px;color:#888"></span>
+        </div>
       </div>`;
   }
 
@@ -699,6 +709,19 @@ async function cargarPCs() {
         </tr>`).join('')}
       </tbody>
     </table>` + rotHtml;
+}
+
+async function ajustarTurnoHoy() {
+  const turno = document.getElementById("turnoHoySelect").value;
+  const msg = document.getElementById("turnoHoyMsg");
+  msg.textContent = "Guardando...";
+  const r = await api({ action: "setturnooffset", turno });
+  if (r.ok) {
+    msg.textContent = "✓ Guardado — " + turno + " limpia hoy";
+    setTimeout(() => cargarPCs(), 800);
+  } else {
+    msg.textContent = r.error || "Error";
+  }
 }
 
 function modalNuevaPC() {

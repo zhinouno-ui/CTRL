@@ -119,6 +119,7 @@ function manejarAccion_(datos) {
   if (datos.action === 'enviarmensaje') return json_(enviarMensaje_(datos));
   if (datos.action === 'getmensajes') return json_(getMensajes_(datos));
   if (datos.action === 'getlimpiezasemana') return json_(getLimpiezaSemana_());
+  if (datos.action === 'setturnooffset') return json_(adminGuard_(datos, setTurnoOffset_));
   if (datos.action === 'gettoppausas') return json_(adminGuard_(datos, getTopPausas_));
 
   return json_({
@@ -2290,11 +2291,30 @@ function getMensajes_(datos) {
 // ==== ROTACION LIMPIEZA ====
 // ===========================
 
+function _getTurnoOffset_() {
+  try {
+    return parseInt(PropertiesService.getScriptProperties().getProperty('TURNO_OFFSET') || '0') || 0;
+  } catch (e) { return 0; }
+}
+
+function setTurnoOffset_(datos) {
+  const turnos = ['TM', 'TT', 'TN'];
+  const turnoDeseado = turnos.indexOf(String(datos.turno || '').trim().toUpperCase());
+  if (turnoDeseado === -1) return { ok: false, error: 'Turno inválido. Usá TM, TT o TN.' };
+  const ahora = new Date();
+  const diaHoy = Math.floor(Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate()) / (24 * 3600 * 1000));
+  // offset para que hoy = turnoDeseado
+  const offset = ((turnoDeseado - (diaHoy % 3)) + 3) % 3;
+  PropertiesService.getScriptProperties().setProperty('TURNO_OFFSET', String(offset));
+  return { ok: true, turnoHoy: turnos[turnoDeseado], offset };
+}
+
 function getLimpiezaSemana_() {
   const r = getPCs_();
   if (!r.pcs.length) return { ok: true, dias: [] };
   const n = r.pcs.length;
   const turnos = ['TM', 'TT', 'TN'];
+  const turnoOffset = _getTurnoOffset_();
   const ahora = new Date();
   const diasSemana = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   const dias = [];
@@ -2302,7 +2322,7 @@ function getLimpiezaSemana_() {
     const d = new Date(Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() + offset));
     const diaIdx = Math.floor(d.getTime() / (24 * 3600 * 1000));
     const pcIdx    = ((diaIdx % n) + n) % n;
-    const turnoIdx = ((diaIdx % 3) + 3) % 3;
+    const turnoIdx = (((diaIdx + turnoOffset) % 3) + 3) % 3;
     dias.push({
       fecha: fecha_(d),
       diaSemana: diasSemana[d.getUTCDay()],
@@ -2311,7 +2331,7 @@ function getLimpiezaSemana_() {
       esHoy: offset === 0
     });
   }
-  return { ok: true, dias, pcs: r.pcs.map(p => p.pc) };
+  return { ok: true, dias, pcs: r.pcs.map(p => p.pc), turnoHoy: turnos[(((Math.floor(Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate()) / (24*3600*1000)) + turnoOffset) % 3 + 3) % 3)] };
 }
 
 // ===========================
