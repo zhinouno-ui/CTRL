@@ -134,6 +134,16 @@
 </style>
 </head>
 <body>
+<script>
+(function(){
+  var ua = navigator.userAgent || '';
+  var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)
+    || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(ua));
+  if (isMobile) {
+    document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:#111;color:#fff;text-align:center;padding:30px;font-family:Arial,sans-serif"><div style="font-size:64px;margin-bottom:20px">🖥️</div><h2 style="margin:0 0 12px;font-size:22px">Solo disponible en PC</h2><p style="color:#888;font-size:15px;line-height:1.6;max-width:300px">Esta aplicación está diseñada para uso en computadora.<br>Accedé desde un navegador de escritorio.</p></div>';
+  }
+})();
+</script>
 
 <!-- LOGIN -->
 <div id="loginCard" class="login-wrap">
