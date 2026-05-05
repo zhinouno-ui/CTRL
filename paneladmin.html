@@ -124,6 +124,13 @@
   .bar-row .val { width:60px; text-align:right; font-size:12px; color:#ddd; }
 
   .top-actions { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; }
+  .chat-admin-msg { padding:8px 12px; border-radius:8px; max-width:80%; word-break:break-word; }
+  .chat-admin-msg.mio { align-self:flex-end; background:#163a5f; }
+  .chat-admin-msg.otro { align-self:flex-start; background:#1f2937; }
+  .chat-admin-msg .meta { font-size:11px; color:#888; margin-bottom:3px; }
+  .rotacion-tabla td, .rotacion-tabla th { padding:8px 14px; text-align:center; }
+  .rotacion-tabla tr.hoy td { background:#1a3a5c; font-weight:bold; }
+  .rotacion-tabla .pc-limpiar { color:#fbbc04; font-weight:bold; font-size:15px; }
 </style>
 </head>
 <body>
@@ -156,6 +163,7 @@
       <button data-section="novedades"   onclick="cambiarSeccion('novedades')">⚠️ Novedades</button>
       <button data-section="recepciones" onclick="cambiarSeccion('recepciones')">🤝 Recepciones</button>
       <button data-section="pausas"      onclick="cambiarSeccion('pausas')">⏸️ Pausas</button>
+      <button data-section="chat"        onclick="cambiarSeccion('chat')">💬 Chat</button>
       <button data-section="notas"       onclick="cambiarSeccion('notas')">📝 Notas turno</button>
       <button data-section="logtel"      onclick="cambiarSeccion('logtel')">📵 Log teléfonos</button>
       <button data-section="historial"   onclick="cambiarSeccion('historial')">📋 Fichajes</button>
@@ -318,6 +326,16 @@
     </section>
 
     <!-- HISTÓRICO FICHAJES -->
+    <!-- CHAT GENERAL -->
+    <section id="section-chat" class="section">
+      <h2 class="section-title">💬 Chat general</h2>
+      <div id="chatAdminMensajes" style="height:420px;overflow-y:auto;background:#111;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px;margin-bottom:14px"></div>
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <textarea id="chatAdminInput" placeholder="Escribir mensaje como admin..." rows="2" style="flex:1;margin:0"></textarea>
+        <button class="success" style="width:auto;padding:10px 18px" onclick="chatAdminEnviar()">Enviar</button>
+      </div>
+    </section>
+
     <section id="section-historial" class="section">
       <h2 class="section-title">📋 Fichajes</h2>
       <div class="filter-bar">
@@ -561,6 +579,7 @@ function cambiarSeccion(seccion) {
   if (seccion === "novedades")   cargarNovedades();
   if (seccion === "recepciones") cargarRecepciones();
   if (seccion === "pausas")      cargarPausas();
+  if (seccion === "chat")        chatAdminIniciar();
   if (seccion === "notas")       cargarNotas();
   if (seccion === "logtel")      cargarLogTel();
   if (seccion === "historial")   cargarHistorial();
@@ -643,7 +662,28 @@ async function cargarPCs() {
   await cargarPCsCache();
   const box = document.getElementById("pcsBox");
   if (!_pcsCache.length) { box.innerHTML = '<div class="empty-state">No hay PCs configuradas.</div>'; return; }
-  box.innerHTML = `
+
+  // Tabla de rotación semanal
+  const rot = await api({ action: "getlimpiezasemana" });
+  let rotHtml = "";
+  if (rot.ok && rot.dias.length) {
+    rotHtml = `
+      <div style="margin-bottom:20px">
+        <h3 style="margin:0 0 10px;font-size:14px;color:#bbb;text-transform:uppercase;letter-spacing:0.5px">🗓️ Rotación de limpieza (14 días)</h3>
+        <table class="rotacion-tabla" style="width:100%;border-collapse:collapse;background:#111;border-radius:10px;overflow:hidden">
+          <thead><tr style="background:#1a1a1a"><th>Día</th><th>Fecha</th><th>PC que limpia</th></tr></thead>
+          <tbody>${rot.dias.map(d => `
+            <tr class="${d.esHoy ? "hoy" : ""}">
+              <td>${escape(d.diaSemana)}</td>
+              <td>${escape(d.fecha)}</td>
+              <td class="pc-limpiar">${escape(d.pc)}${d.esHoy ? " ← HOY" : ""}</td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  box.innerHTML = rotHtml + `
     <table>
       <thead><tr><th>PC</th><th>Orden limpieza</th><th>Estado</th><th></th></tr></thead>
       <tbody>${_pcsCache.map(p => `
@@ -695,11 +735,17 @@ async function eliminarPC(pc) {
 // =========== OPERADORES ===========
 
 async function cargarOperadores() {
-  const r = await api({ action: "getoperadoresadmin" });
+  const [r, top] = await Promise.all([
+    api({ action: "getoperadoresadmin" }),
+    api({ action: "gettoppausas" })
+  ]);
   if (!r.ok) return;
   _operadoresCache = r.operadores || [];
+  _topPausasCache = top.ok ? top : null;
   renderOperadores();
 }
+
+let _topPausasCache = null;
 
 function renderOperadores() {
   const box = document.getElementById("operadoresBox");
@@ -739,12 +785,39 @@ function renderOperadores() {
       ${_barChartHtml("Por tipo", porTipo)}
     </div>`;
 
+  // Top 5 pausas
+  let topHtml = "";
+  if (_topPausasCache) {
+    const t = _topPausasCache;
+    const col = (list, titulo, campo) => {
+      if (!list.length) return "";
+      return `<div>
+        <h4 style="font-size:12px;color:#bbb;text-transform:uppercase;margin:0 0 8px">${titulo}</h4>
+        ${list.map((o,i) => `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="color:#666;width:16px">${i+1}</span>
+            <span style="flex:1;font-size:13px">${escape(o.operador)}</span>
+            <span class="badge gray" style="font-size:11px">${o[campo]} min</span>
+          </div>`).join("")}
+      </div>`;
+    };
+    topHtml = `
+      <div class="bar-chart" style="margin-bottom:18px">
+        <h4>🏆 Top 5 por tiempo de pausa</h4>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:20px">
+          ${col(t.topBano, "🚽 Baño", "bano")}
+          ${col(t.topFumar, "🚬 Fumar", "fumar")}
+          ${col(t.topLimpieza, "🧹 Limpieza", "limpieza")}
+        </div>
+      </div>`;
+  }
+
   if (!ops.length) {
-    box.innerHTML = statsHtml + charts + '<div class="empty-state">Sin resultados.</div>';
+    box.innerHTML = statsHtml + charts + topHtml + '<div class="empty-state">Sin resultados.</div>';
     return;
   }
 
-  box.innerHTML = statsHtml + charts + `
+  box.innerHTML = statsHtml + charts + topHtml + `
     <table>
       <thead><tr>
         <th>Nombre</th><th>PIN</th><th>Turno</th><th>PC</th><th>Tipo</th><th>Activo</th><th></th>
@@ -874,11 +947,10 @@ function modalNuevoTelefono() {
     { id: "linea", label: "Línea (ej: Principal 1)" },
     { id: "tipo", label: "Tipo", type: "select", opciones: ["Principal", "Soporte"] },
     { id: "pc", label: "PC" },
-    { id: "estadoEsperado", label: "Estado esperado", type: "select", opciones: ["Activo", "Inactivo"] },
-    { id: "activoEnSistema", label: "Activo en sistema", type: "select", opciones: ["Sí", "No"] },
+    { id: "activoEnSistema", label: "En servicio", type: "select", opciones: ["Sí", "No"] },
     { id: "numero", label: "Número" }
   ], onSave: async (vals) => {
-    const r = await api({ action: "creartelefono", ...vals });
+    const r = await api({ action: "creartelefono", estadoEsperado: "Activo", ...vals });
     if (!r.ok) return alert(r.error);
     cerrarModal(); cargarTelefonos();
   }});
@@ -891,11 +963,10 @@ function modalEditarTelefono(linea, pc) {
     { id: "linea", label: "Línea", value: t.linea },
     { id: "tipo", label: "Tipo", type: "select", opciones: ["Principal", "Soporte"], value: t.tipo },
     { id: "pc", label: "PC", value: t.pc },
-    { id: "estadoEsperado", label: "Estado esperado", type: "select", opciones: ["Activo", "Inactivo"], value: t.estadoEsperado },
-    { id: "activoEnSistema", label: "Activo en sistema", type: "select", opciones: ["Sí", "No"], value: t.activoEnSistema },
+    { id: "activoEnSistema", label: "En servicio", type: "select", opciones: ["Sí", "No"], value: t.activoEnSistema },
     { id: "numero", label: "Número", value: t.numero }
   ], onSave: async (vals) => {
-    const r = await api({ action: "editartelefono", lineaOriginal: linea, pcOriginal: pc, ...vals });
+    const r = await api({ action: "editartelefono", lineaOriginal: linea, pcOriginal: pc, estadoEsperado: "Activo", ...vals });
     if (!r.ok) return alert(r.error);
     cerrarModal(); cargarTelefonos();
   }});
@@ -1201,9 +1272,8 @@ async function cargarRecepciones() {
   const all = r.recepciones || [];
   const total = all.length;
   const ok = (v) => { const s = String(v||"").toLowerCase(); return s==="sí"||s==="si"; };
-  const cajaOk = all.filter(re => ok(re.cajaOk)).length;
-  const waOk   = all.filter(re => ok(re.whatsappOk)).length;
-  const revOk  = all.filter(re => ok(re.revinculacionOk)).length;
+  const cajaOk  = all.filter(re => ok(re.cajaOk)).length;
+  const waOk    = all.filter(re => ok(re.whatsappOk)).length;
   const ordenOk = all.filter(re => ok(re.puestoOrden)).length;
   const pct = (n) => total ? Math.round(n/total*100) : 0;
   const colorPct = (p) => p>=90?"green":(p>=70?"yellow":"red");
@@ -1212,7 +1282,6 @@ async function cargarRecepciones() {
     { num: total, label: "Total recepciones", color: "gray" },
     { num: pct(cajaOk) + "%", label: "Caja OK", color: colorPct(pct(cajaOk)) },
     { num: pct(waOk) + "%", label: "WhatsApp OK", color: colorPct(pct(waOk)) },
-    { num: pct(revOk) + "%", label: "Revinculación OK", color: colorPct(pct(revOk)) },
     { num: pct(ordenOk) + "%", label: "Puesto en orden", color: colorPct(pct(ordenOk)) }
   ]);
 
@@ -1236,7 +1305,6 @@ async function cargarRecepciones() {
           <span class="badge ${cajaBad?'red':'green'}">Caja: ${escape(re.cajaOk)}</span>
           ${cajaBad && re.diferenciaCaja ? `<span class="badge red">Diferencia: ${escape(re.diferenciaCaja)}</span>` : ''}
           <span class="badge ${waBad?'red':'green'}">WhatsApp: ${escape(re.whatsappOk)}</span>
-          <span class="badge ${revBad?'red':'green'}">Revinculación: ${escape(re.revinculacionOk)}</span>
           <span class="badge ${String(re.puestoOrden||'').toLowerCase()==='no'?'red':'green'}">Orden: ${escape(re.puestoOrden)}</span>
           <span class="badge gray">Limpieza: ${escape(re.limpieza)}</span>
         </div>
@@ -1264,7 +1332,6 @@ function modalEditarRecepcion(idx) {
     { id: "whatsappOk", label: "WhatsApp OK", type: "select", opciones: ["Sí","No"], value: re.whatsappOk || "Sí" },
     { id: "cajaOk", label: "Caja OK", type: "select", opciones: ["Sí","No"], value: re.cajaOk || "Sí" },
     { id: "diferenciaCaja", label: "Diferencia caja", type: "textarea", value: re.diferenciaCaja || "" },
-    { id: "revinculacionOk", label: "Revinculación OK", type: "select", opciones: ["Sí","No"], value: re.revinculacionOk || "Sí" },
     { id: "telefonosCaidos", label: "Teléfonos caídos (texto libre)", value: re.telefonosCaidos || "" },
     { id: "limpiezaCumplida", label: "Limpieza", type: "select", opciones: ["Sí","No","No corresponde"], value: re.limpieza || "No corresponde" },
     { id: "observaciones", label: "Observaciones", type: "textarea", value: re.observaciones || "" }
@@ -1658,6 +1725,60 @@ function abrirModal({ titulo, campos, onSave, html, soloLectura }) {
 function cerrarModal() {
   document.getElementById("modalRoot").innerHTML = "";
   window._modalSave = null;
+}
+
+// =========== CHAT ADMIN ===========
+
+let _chatAdminUltimoTs = null;
+let _chatAdminInterval = null;
+
+async function chatAdminIniciar() {
+  if (_chatAdminInterval) return; // ya corriendo
+  await chatAdminCargar(false);
+  _chatAdminInterval = setInterval(() => chatAdminCargar(true), 8000);
+  const input = document.getElementById("chatAdminInput");
+  if (input) input.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chatAdminEnviar(); }
+  });
+}
+
+async function chatAdminCargar(silencioso) {
+  const box = document.getElementById("chatAdminMensajes");
+  if (!box) return;
+  const params = { action: "getmensajes", limit: 60 };
+  if (_chatAdminUltimoTs) params.desdeTs = _chatAdminUltimoTs;
+  const r = await api(params);
+  if (!r.ok || !r.mensajes) return;
+  if (!r.mensajes.length && !silencioso) {
+    box.innerHTML = '<div style="color:#666;text-align:center;padding:30px 0">Sin mensajes todavía.</div>';
+    return;
+  }
+  const yo = (admin && admin.nombre || "").toLowerCase();
+  r.mensajes.forEach(m => {
+    const ts = new Date(m.timestamp);
+    const tsStr = ts.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+    const esMio = String(m.operador || "").toLowerCase() === yo;
+    const div = document.createElement("div");
+    div.className = "chat-admin-msg " + (esMio ? "mio" : "otro");
+    div.innerHTML = `
+      <div class="meta">${esMio ? "Vos (admin)" : (escape(m.operador) + (m.pc ? " · " + escape(m.pc) : ""))} · ${tsStr}</div>
+      <div style="color:#ddd;font-size:13px">${escape(m.texto)}</div>`;
+    box.appendChild(div);
+    _chatAdminUltimoTs = m.timestamp;
+  });
+  if (r.mensajes.length) box.scrollTop = box.scrollHeight;
+}
+
+async function chatAdminEnviar() {
+  const input = document.getElementById("chatAdminInput");
+  const texto = input ? input.value.trim() : "";
+  if (!texto || !admin) return;
+  input.value = "";
+  input.disabled = true;
+  const r = await api({ action: "enviarmensaje", nombre: admin.nombre, pc: "Admin", turno: "", nota: texto });
+  input.disabled = false;
+  if (r.ok) chatAdminCargar(true);
+  else input.value = texto;
 }
 
 // =========== INIT ===========

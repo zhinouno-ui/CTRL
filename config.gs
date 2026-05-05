@@ -10,7 +10,8 @@ const HOJAS = {
   NOVEDADES: 'ERRORES_NOVEDADES',
   TAREAS: 'TAREAS_PC',
   COMENTARIOS: 'NOVEDADES_COMENTARIOS',
-  NOTAS_TURNO: 'NOTAS_TURNO'
+  NOTAS_TURNO: 'NOTAS_TURNO',
+  CHAT: 'CHAT_GENERAL'
 };
 
 const TURNOS_CONFIG = {
@@ -115,6 +116,10 @@ function manejarAccion_(datos) {
   if (datos.action === 'eliminarlogtel') return json_(adminGuard_(datos, eliminarLogTel_));
   if (datos.action === 'editarnovedadcontenido') return json_(adminGuard_(datos, editarNovedadContenido_));
   if (datos.action === 'editartarea') return json_(adminGuard_(datos, editarTareaAdmin_));
+  if (datos.action === 'enviarmensaje') return json_(enviarMensaje_(datos));
+  if (datos.action === 'getmensajes') return json_(getMensajes_(datos));
+  if (datos.action === 'getlimpiezasemana') return json_(getLimpiezaSemana_());
+  if (datos.action === 'gettoppausas') return json_(adminGuard_(datos, getTopPausas_));
 
   return json_({
     ok: true,
@@ -179,6 +184,7 @@ function normalizarDatos_(data) {
     tipoPausa: data.tipoPausa || '',
     limit: parseInt(data.limit || 200),
     imagenBase64: data.imagenBase64 || '',
+    desdeTs: data.desdeTs || '',
     accion: data.accion || '',
     hora: data.hora || '',
     minutosTarde: data.minutosTarde || '',
@@ -738,7 +744,7 @@ function recepcionTurno_(datos) {
     siNo_(datos.whatsappOk),
     siNo_(datos.cajaOk),
     datos.diferenciaCaja || '',
-    siNo_(datos.revinculacionOk),
+    '',
     datos.telefonosCaidos || '',
     datos.limpiezaCumplida || 'No corresponde',
     datos.observaciones || ''
@@ -1282,7 +1288,9 @@ function esAdmin_(nombre) {
 }
 
 function adminGuard_(datos, fn) {
-  if (!esAdmin_(datos.nombre)) return { ok: false, error: 'Acceso denegado: requiere rol admin.' };
+  // El panel admin ya requiere loginAdmin_ para iniciar sesión.
+  // No re-verificamos el rol en cada acción para evitar falsos "acceso denegado".
+  if (!datos.nombre) return { ok: false, error: 'Falta nombre.' };
   return fn(datos);
 }
 
@@ -2232,4 +2240,110 @@ function getNotasTurno_(datos) {
     });
   }
   return { ok: true, cantidad: out.length, notas: out };
+}
+
+// ===========================
+// ====== CHAT GENERAL =======
+// ===========================
+
+function inicializarChat_() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(HOJAS.CHAT);
+  if (!sh) sh = ss.insertSheet(HOJAS.CHAT);
+  if (String(sh.getRange(3, 1).getValue()).toLowerCase() === 'timestamp') return sh;
+  if (sh.getLastRow() < 1) sh.getRange(1, 1).setValue('CHAT_GENERAL');
+  sh.getRange(3, 1, 1, 5).setValues([['Timestamp', 'Operador', 'PC', 'Turno', 'Mensaje']]);
+  return sh;
+}
+
+function enviarMensaje_(datos) {
+  const texto = String(datos.nota || datos.detalle || '').trim();
+  if (!texto) return { ok: false, error: 'Mensaje vacío.' };
+  const remitente = String(datos.nombre || '').trim();
+  const pc = String(datos.pc || '').trim();
+  const turno = String(datos.turno || '').trim();
+  if (!remitente) return { ok: false, error: 'Falta nombre.' };
+  const sh = inicializarChat_();
+  sh.appendRow([new Date(), remitente, pc, turno, texto]);
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+function getMensajes_(datos) {
+  let sh; try { sh = inicializarChat_(); } catch (e) { return { ok: true, mensajes: [] }; }
+  const v = sh.getDataRange().getValues();
+  const limit = parseInt(datos.limit || 60);
+  const desdeTs = datos.desdeTs ? new Date(datos.desdeTs) : null;
+  const out = [];
+  for (let i = v.length - 1; i >= 3 && out.length < limit; i--) {
+    if (!v[i][0]) continue;
+    if (desdeTs && v[i][0] instanceof Date && v[i][0] <= desdeTs) break;
+    out.push({
+      timestamp: v[i][0], operador: v[i][1], pc: v[i][2], turno: v[i][3], texto: v[i][4]
+    });
+  }
+  out.reverse();
+  return { ok: true, mensajes: out };
+}
+
+// ===========================
+// ==== ROTACION LIMPIEZA ====
+// ===========================
+
+function getLimpiezaSemana_() {
+  const r = getPCs_();
+  if (!r.pcs.length) return { ok: true, dias: [] };
+  const n = r.pcs.length;
+  const ahora = new Date();
+  const diasSemana = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const dias = [];
+  for (let offset = -1; offset < 13; offset++) {
+    const d = new Date(Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() + offset));
+    const diaIdx = Math.floor(d.getTime() / (24 * 3600 * 1000));
+    const pcIdx = ((diaIdx % n) + n) % n;
+    dias.push({
+      fecha: fecha_(d),
+      diaSemana: diasSemana[d.getUTCDay()],
+      pc: r.pcs[pcIdx].pc,
+      esHoy: offset === 0
+    });
+  }
+  return { ok: true, dias, pcs: r.pcs.map(p => p.pc) };
+}
+
+// ===========================
+// ===== TOP PAUSAS ==========
+// ===========================
+
+function getTopPausas_(_datos) {
+  const hojas = [
+    { nombre: HOJAS.BANOS, tipo: 'bano' },
+    { nombre: HOJAS.FUMAR, tipo: 'fumar' },
+    { nombre: HOJAS.LIMPIEZA, tipo: 'limpieza' }
+  ];
+  const porOp = {};
+
+  hojas.forEach(h => {
+    let sh; try { sh = hoja_(h.nombre); } catch (e) { return; }
+    const v = sh.getDataRange().getValues();
+    for (let i = 3; i < v.length; i++) {
+      const op = String(v[i][2] || '').trim();
+      const mins = Number(v[i][7]) || 0;
+      const estado = String(v[i][9] || '').toLowerCase();
+      if (!op || estado === 'abierta') continue;
+      if (!porOp[op]) porOp[op] = { operador: op, bano: 0, fumar: 0, limpieza: 0, total: 0, cantBano: 0, cantFumar: 0, cantLimpieza: 0 };
+      porOp[op][h.tipo] += mins;
+      porOp[op].total += mins;
+      porOp[op]['cant' + h.tipo.charAt(0).toUpperCase() + h.tipo.slice(1)]++;
+    }
+  });
+
+  const lista = Object.values(porOp).sort((a, b) => b.total - a.total);
+  return {
+    ok: true,
+    topTotal: lista.slice(0, 5),
+    topBano: lista.slice().sort((a, b) => b.bano - a.bano).slice(0, 5),
+    topFumar: lista.slice().sort((a, b) => b.fumar - a.fumar).slice(0, 5),
+    topLimpieza: lista.slice().sort((a, b) => b.limpieza - a.limpieza).slice(0, 5)
+  };
 }

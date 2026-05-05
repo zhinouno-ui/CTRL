@@ -225,6 +225,12 @@
       margin-bottom: 12px;
     }
 
+    .chat-msg { padding:8px 12px; border-radius:8px; max-width:85%; word-break:break-word; font-size:13px; }
+    .chat-msg.mio { align-self:flex-end; background:#1a3a5c; border-bottom-right-radius:2px; }
+    .chat-msg.otro { align-self:flex-start; background:#2c2c2c; border-bottom-left-radius:2px; }
+    .chat-msg .meta { font-size:11px; color:#888; margin-bottom:3px; }
+    .chat-msg .texto { color:#ddd; }
+
     @keyframes slideIn {
       from { transform: translateX(100%); opacity: 0; }
       to { transform: translateX(0); opacity: 1; }
@@ -414,14 +420,14 @@
       <div id="ultimaTareaBox"></div>
     </div>
 
-    <!-- NOTAS DEL TURNO (POR PC) -->
-    <div class="card" id="notasTurnoCard">
-      <h3>📝 Notas del turno</h3>
-      <div id="notasAnterioresBox" style="margin-bottom:14px"></div>
-      <label>Tu nota para el siguiente turno</label>
-      <textarea id="miNotaTurno" placeholder="Algo que el siguiente operador debería saber sobre esta PC..."></textarea>
-      <button class="primary" onclick="guardarMiNotaTurno()">Guardar nota</button>
-      <div id="notaTurnoMsg" class="msg"></div>
+    <!-- CHAT GENERAL -->
+    <div class="card" id="chatCard">
+      <h3>💬 Chat general</h3>
+      <div id="chatMensajes" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:12px;padding:4px 0"></div>
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <textarea id="chatInput" placeholder="Escribir mensaje..." rows="2" style="flex:1;margin:0"></textarea>
+        <button class="primary" style="width:auto;padding:10px 18px;margin:0" onclick="chatEnviar()">Enviar</button>
+      </div>
     </div>
 
     <!-- NOVEDADES -->
@@ -466,14 +472,6 @@
         <div>
           <label>Caja correcta</label>
           <select id="cajaOk" onchange="toggleDiferenciaCaja()">
-            <option>Sí</option>
-            <option>No</option>
-          </select>
-        </div>
-
-        <div>
-          <label>Revinculación OK</label>
-          <select id="revinculacionOk">
             <option>Sí</option>
             <option>No</option>
           </select>
@@ -761,7 +759,7 @@
     cargarNovedades();
     cargarTareas();
     cargarMisNovedades();
-    cargarNotasTurnoAnteriores();
+    chatIniciar();
     toggleDiferenciaCaja();
   }
 
@@ -1197,7 +1195,7 @@
       whatsappOk: document.getElementById("whatsappOk").value,
       cajaOk: document.getElementById("cajaOk").value,
       diferenciaCaja: document.getElementById("diferenciaCaja").value,
-      revinculacionOk: document.getElementById("revinculacionOk").value,
+      revinculacionOk: "",
       limpiezaCumplida: document.getElementById("limpiezaCumplida").value,
       observaciones: document.getElementById("obsRecepcion").value
     });
@@ -1449,23 +1447,65 @@
     `).join("");
   }
 
-  async function guardarMiNotaTurno() {
-    const nota = document.getElementById("miNotaTurno").value.trim();
-    if (!nota) { setMsg("notaTurnoMsg", "Escribí la nota primero."); return; }
-    setMsg("notaTurnoMsg", "Guardando...");
+  // === CHAT GENERAL ===
+  let _chatUltimoTs = null;
+  let _chatInterval = null;
+
+  async function chatCargar(silencioso) {
+    if (!operador) return;
+    const box = document.getElementById("chatMensajes");
+    if (!box) return;
+    const params = { action: "getmensajes", limit: 60 };
+    if (_chatUltimoTs) params.desdeTs = _chatUltimoTs;
+    const r = await api(params);
+    if (!r.ok || !r.mensajes) return;
+    if (!r.mensajes.length && !silencioso) {
+      box.innerHTML = '<div class="small" style="color:#666;text-align:center;padding:20px 0">Sin mensajes todavía.</div>';
+      return;
+    }
+    const yoBajo = operador.nombre.toLowerCase();
+    const esNuevo = !!r.mensajes.length;
+    r.mensajes.forEach(m => {
+      if (!m.timestamp) return;
+      const ts = new Date(m.timestamp);
+      const tsStr = ts.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+      const esMio = m.operador.toLowerCase() === yoBajo;
+      const div = document.createElement("div");
+      div.className = "chat-msg " + (esMio ? "mio" : "otro");
+      div.innerHTML = `
+        <div class="meta">${esMio ? "Vos" : (m.operador + (m.pc ? " · " + m.pc : ""))} · ${tsStr}</div>
+        <div class="texto">${m.texto.replace(/</g,"&lt;")}</div>`;
+      box.appendChild(div);
+      _chatUltimoTs = m.timestamp;
+    });
+    if (esNuevo) box.scrollTop = box.scrollHeight;
+  }
+
+  async function chatEnviar() {
+    const input = document.getElementById("chatInput");
+    const texto = input ? input.value.trim() : "";
+    if (!texto || !operador) return;
+    input.value = "";
+    input.disabled = true;
     const r = await api({
-      action: "guardarnotaturno",
+      action: "enviarmensaje",
       nombre: operador.nombre,
       pc: operador.pc,
-      nota
+      turno: operador.turno,
+      nota: texto
     });
-    if (r.ok) {
-      setMsg("notaTurnoMsg", "Nota guardada ✓");
-      document.getElementById("miNotaTurno").value = "";
-      cargarNotasTurnoAnteriores();
-    } else {
-      setMsg("notaTurnoMsg", r.error || "Error al guardar.");
-    }
+    input.disabled = false;
+    if (r.ok) chatCargar(true);
+    else input.value = texto;
+  }
+
+  function chatIniciar() {
+    chatCargar(false);
+    _chatInterval = setInterval(() => chatCargar(true), 10000);
+    const input = document.getElementById("chatInput");
+    if (input) input.addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chatEnviar(); }
+    });
   }
 
   // === COMENTARIOS EN NOVEDADES ===
