@@ -103,6 +103,18 @@ function manejarAccion_(datos) {
   if (datos.action === 'getpausasadmin') return json_(adminGuard_(datos, getPausasAdmin_));
   if (datos.action === 'getrecepciones') return json_(adminGuard_(datos, getRecepciones_));
   if (datos.action === 'getlogtelefonosadmin') return json_(adminGuard_(datos, getLogTelefonosAdmin_));
+  if (datos.action === 'editarfichaje') return json_(adminGuard_(datos, editarFichaje_));
+  if (datos.action === 'eliminarfichaje') return json_(adminGuard_(datos, eliminarFichaje_));
+  if (datos.action === 'editarpausaadmin') return json_(adminGuard_(datos, editarPausaAdmin_));
+  if (datos.action === 'eliminarpausa') return json_(adminGuard_(datos, eliminarPausa_));
+  if (datos.action === 'editarrecepcion') return json_(adminGuard_(datos, editarRecepcion_));
+  if (datos.action === 'eliminarrecepcion') return json_(adminGuard_(datos, eliminarRecepcion_));
+  if (datos.action === 'editarnotaturno') return json_(adminGuard_(datos, editarNotaTurno_));
+  if (datos.action === 'eliminarnotaturno') return json_(adminGuard_(datos, eliminarNotaTurno_));
+  if (datos.action === 'editarlogtel') return json_(adminGuard_(datos, editarLogTel_));
+  if (datos.action === 'eliminarlogtel') return json_(adminGuard_(datos, eliminarLogTel_));
+  if (datos.action === 'editarnovedadcontenido') return json_(adminGuard_(datos, editarNovedadContenido_));
+  if (datos.action === 'editartarea') return json_(adminGuard_(datos, editarTareaAdmin_));
 
   return json_({
     ok: true,
@@ -167,6 +179,19 @@ function normalizarDatos_(data) {
     tipoPausa: data.tipoPausa || '',
     limit: parseInt(data.limit || 200),
     imagenBase64: data.imagenBase64 || '',
+    accion: data.accion || '',
+    hora: data.hora || '',
+    minutosTarde: data.minutosTarde || '',
+    horaSalida: data.horaSalida || '',
+    horaRegreso: data.horaRegreso || '',
+    minutos: data.minutos || '',
+    excedio: data.excedio || '',
+    horaCaida: data.horaCaida || '',
+    horaLevantado: data.horaLevantado || '',
+    duracion: data.duracion || '',
+    operadorCaida: data.operadorCaida || '',
+    operadorLevanta: data.operadorLevanta || '',
+    fechaTexto: data.fechaTexto || data.fecha || '',
 
     id: data.id || '',
     estado: data.estado || '',
@@ -1706,6 +1731,7 @@ function getFichajes_(datos) {
     if (!_enRango_(v[i][0], datos.desde, datos.hasta)) continue;
     if (opF && String(v[i][2]).trim().toLowerCase() !== opF) continue;
     out.push({
+      fila: i + 1,
       timestamp: v[i][0], fecha: v[i][1], nombre: v[i][2], turno: v[i][3], pc: v[i][4],
       tipo: v[i][5], accion: v[i][6], hora: v[i][7], estado: v[i][8],
       minutosTarde: v[i][9], observaciones: v[i][10]
@@ -1733,7 +1759,7 @@ function getPausasAdmin_(datos) {
       if (opF && String(v[i][2]).trim().toLowerCase() !== opF) continue;
       if (pcF && String(v[i][4] || '').trim().toLowerCase() !== pcF) continue;
       out.push({
-        tipoPausa: k,
+        fila: i + 1, tipoPausa: k,
         timestamp: v[i][0], fecha: v[i][1], operador: v[i][2], turno: v[i][3], pc: v[i][4],
         horaSalida: v[i][5], horaRegreso: v[i][6], minutos: v[i][7], excedio: v[i][8],
         estado: v[i][9], observaciones: v[i][10]
@@ -1758,6 +1784,7 @@ function getRecepciones_(datos) {
     if (!_enRango_(v[i][0], datos.desde, datos.hasta)) continue;
     if (pcF && String(v[i][3] || '').trim().toLowerCase() !== pcF) continue;
     out.push({
+      fila: i + 1,
       timestamp: v[i][0], fecha: v[i][1], turno: v[i][2], pc: v[i][3],
       recibe: v[i][4], entrega: v[i][5], puestoOrden: v[i][6], whatsappOk: v[i][7],
       cajaOk: v[i][8], diferenciaCaja: v[i][9], revinculacionOk: v[i][10],
@@ -1785,6 +1812,7 @@ function getLogTelefonosAdmin_(datos) {
     if (lineaF && String(logRange[i][2] || '').trim().toLowerCase() !== lineaF) continue;
     if (!_enRango_(logRange[i][0], datos.desde, datos.hasta)) continue;
     log.push({
+      fila: 4 + i,
       timestamp: logRange[i][0], pc: logRange[i][1], linea: logRange[i][2],
       horaCaida: logRange[i][3], operadorCaida: logRange[i][4], motivo: logRange[i][5],
       horaLevantado: logRange[i][6], duracion: logRange[i][7],
@@ -1960,6 +1988,213 @@ function getNotaTurnoAnterior_(datos) {
   return { ok: true, notas: out };
 }
 
+// ===========================
+// ====== EDICION ADMIN ======
+// ===========================
+
+// Helper: parsea "HH:MM" o "HH:MM:SS" a string normalizado HH:MM:SS
+function _parseHora_(s) {
+  if (!s) return '';
+  const m = String(s).trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return String(s);
+  const h = ('0' + m[1]).slice(-2);
+  const min = m[2];
+  const sec = m[3] || '00';
+  return h + ':' + min + ':' + sec;
+}
+
+// Aplica updates {col: valor} a una fila si valor !== undefined && valor !== null
+function _setFila_(sh, fila, updates) {
+  Object.keys(updates).forEach(col => {
+    const v = updates[col];
+    if (v === undefined || v === null) return;
+    sh.getRange(fila, parseInt(col)).setValue(v);
+  });
+  SpreadsheetApp.flush();
+}
+
+// --- FICHAJES ---
+function editarFichaje_(datos) {
+  const fila = parseInt(datos.fila || 0);
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  const sh = hoja_(HOJAS.FICHAJES);
+  const updates = {};
+  if (datos.fechaTexto) updates[2] = datos.fechaTexto;
+  if (datos.nombre) updates[3] = datos.nombre;
+  if (datos.turno) updates[4] = datos.turno;
+  if (datos.pc) updates[5] = datos.pc;
+  if (datos.tipo) updates[6] = datos.tipo;
+  if (datos.accion) updates[7] = datos.accion;
+  if (datos.hora) updates[8] = _parseHora_(datos.hora);
+  if (datos.estado) updates[9] = datos.estado;
+  if (datos.minutosTarde !== '' && datos.minutosTarde !== undefined) updates[10] = parseInt(datos.minutosTarde) || 0;
+  if (datos.observaciones !== undefined) updates[11] = datos.observaciones;
+  _setFila_(sh, fila, updates);
+  return { ok: true };
+}
+
+function eliminarFichaje_(datos) {
+  const fila = parseInt(datos.fila || 0);
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  hoja_(HOJAS.FICHAJES).deleteRow(fila);
+  return { ok: true };
+}
+
+// --- PAUSAS ---
+function _hojaPausa_(tipoPausa) {
+  const t = String(tipoPausa || '').toLowerCase();
+  if (t === 'bano' || t === 'baño' || t === 'baño') return HOJAS.BANOS;
+  if (t === 'fumar') return HOJAS.FUMAR;
+  if (t === 'limpieza') return HOJAS.LIMPIEZA;
+  return null;
+}
+
+function editarPausaAdmin_(datos) {
+  const fila = parseInt(datos.fila || 0);
+  const hojaNombre = _hojaPausa_(datos.tipoPausa);
+  if (!hojaNombre) return { ok: false, error: 'Tipo de pausa inválido.' };
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  const sh = hoja_(hojaNombre);
+  const updates = {};
+  if (datos.fechaTexto) updates[2] = datos.fechaTexto;
+  if (datos.operador) updates[3] = datos.operador;
+  if (datos.turno) updates[4] = datos.turno;
+  if (datos.pc) updates[5] = datos.pc;
+  if (datos.horaSalida) updates[6] = _parseHora_(datos.horaSalida);
+  if (datos.horaRegreso !== undefined) updates[7] = datos.horaRegreso ? _parseHora_(datos.horaRegreso) : '';
+  if (datos.minutos !== '' && datos.minutos !== undefined) updates[8] = parseInt(datos.minutos) || 0;
+  if (datos.excedio) updates[9] = datos.excedio;
+  if (datos.estado) updates[10] = datos.estado;
+  if (datos.observaciones !== undefined) updates[11] = datos.observaciones;
+  _setFila_(sh, fila, updates);
+  return { ok: true };
+}
+
+function eliminarPausa_(datos) {
+  const fila = parseInt(datos.fila || 0);
+  const hojaNombre = _hojaPausa_(datos.tipoPausa);
+  if (!hojaNombre) return { ok: false, error: 'Tipo inválido.' };
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  hoja_(hojaNombre).deleteRow(fila);
+  return { ok: true };
+}
+
+// --- RECEPCIONES ---
+function editarRecepcion_(datos) {
+  const fila = parseInt(datos.fila || 0);
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  const sh = hoja_(HOJAS.RECEPCION);
+  const updates = {};
+  if (datos.fechaTexto) updates[2] = datos.fechaTexto;
+  if (datos.turno) updates[3] = datos.turno;
+  if (datos.pc) updates[4] = datos.pc;
+  if (datos.recibe) updates[5] = datos.recibe;
+  if (datos.entrega !== undefined) updates[6] = datos.entrega;
+  if (datos.puestoOrden) updates[7] = siNo_(datos.puestoOrden);
+  if (datos.whatsappOk) updates[8] = siNo_(datos.whatsappOk);
+  if (datos.cajaOk) updates[9] = siNo_(datos.cajaOk);
+  if (datos.diferenciaCaja !== undefined) updates[10] = datos.diferenciaCaja;
+  if (datos.revinculacionOk) updates[11] = siNo_(datos.revinculacionOk);
+  if (datos.telefonosCaidos !== undefined) updates[12] = datos.telefonosCaidos;
+  if (datos.limpiezaCumplida) updates[13] = datos.limpiezaCumplida;
+  if (datos.observaciones !== undefined) updates[14] = datos.observaciones;
+  _setFila_(sh, fila, updates);
+  return { ok: true };
+}
+
+function eliminarRecepcion_(datos) {
+  const fila = parseInt(datos.fila || 0);
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  hoja_(HOJAS.RECEPCION).deleteRow(fila);
+  return { ok: true };
+}
+
+// --- NOTAS DE TURNO ---
+function editarNotaTurno_(datos) {
+  const fila = parseInt(datos.fila || 0);
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  const sh = inicializarNotasTurno_();
+  const updates = {};
+  if (datos.fechaTexto) updates[2] = datos.fechaTexto;
+  if (datos.turno) updates[3] = datos.turno;
+  if (datos.pc) updates[4] = datos.pc;
+  if (datos.operador) updates[5] = datos.operador;
+  if (datos.nota !== undefined) updates[6] = datos.nota;
+  _setFila_(sh, fila, updates);
+  return { ok: true };
+}
+
+function eliminarNotaTurno_(datos) {
+  const fila = parseInt(datos.fila || 0);
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  inicializarNotasTurno_().deleteRow(fila);
+  return { ok: true };
+}
+
+// --- LOG TELEFONOS (vive en CONFIG_TELEFONOS desde col H) ---
+function editarLogTel_(datos) {
+  const fila = parseInt(datos.fila || 0);
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  const sh = hoja_(HOJAS.TELEFONOS);
+  // Cols H-Q = 8-17
+  const updates = {};
+  if (datos.pc) updates[9] = datos.pc;
+  if (datos.linea) updates[10] = datos.linea;
+  if (datos.horaCaida) updates[11] = _parseHora_(datos.horaCaida);
+  if (datos.operadorCaida) updates[12] = datos.operadorCaida;
+  if (datos.motivo !== undefined) updates[13] = datos.motivo;
+  if (datos.horaLevantado !== undefined) updates[14] = datos.horaLevantado ? _parseHora_(datos.horaLevantado) : '';
+  if (datos.duracion !== '' && datos.duracion !== undefined) updates[15] = parseInt(datos.duracion) || 0;
+  if (datos.operadorLevanta !== undefined) updates[16] = datos.operadorLevanta;
+  if (datos.estado) updates[17] = datos.estado;
+  _setFila_(sh, fila, updates);
+  return { ok: true };
+}
+
+function eliminarLogTel_(datos) {
+  const fila = parseInt(datos.fila || 0);
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  // No deleteRow porque cols A-F tienen la lista de teléfonos. Limpiar solo H-Q.
+  const sh = hoja_(HOJAS.TELEFONOS);
+  sh.getRange(fila, 8, 1, 10).clearContent();
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+// --- NOVEDAD CONTENIDO COMPLETO (no solo estado/resolución) ---
+function editarNovedadContenido_(datos) {
+  const fila = parseInt(datos.fila || 0);
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  const sh = hoja_(HOJAS.NOVEDADES);
+  const updates = {};
+  if (datos.fechaTexto) updates[2] = datos.fechaTexto;
+  if (datos.operador) updates[3] = datos.operador;
+  if (datos.turno) updates[4] = datos.turno;
+  if (datos.pc) updates[5] = datos.pc;
+  if (datos.tipo) updates[6] = datos.tipo;
+  if (datos.prioridad) updates[7] = datos.prioridad;
+  if (datos.detalle !== undefined) updates[8] = datos.detalle;
+  if (datos.observaciones !== undefined) updates[10] = datos.observaciones;
+  if (datos.estado) updates[12] = datos.estado;
+  if (datos.revisadoPor !== undefined) updates[13] = datos.revisadoPor;
+  if (datos.resolucion !== undefined) updates[14] = datos.resolucion;
+  _setFila_(sh, fila, updates);
+  return { ok: true };
+}
+
+// --- TAREAS ---
+function editarTareaAdmin_(datos) {
+  const fila = parseInt(datos.fila || 0);
+  if (!fila || fila < 4) return { ok: false, error: 'Fila inválida.' };
+  const sh = inicializarTareasPC_();
+  const updates = {};
+  if (datos.pc) updates[3] = datos.pc;
+  if (datos.tareaTexto) updates[4] = datos.tareaTexto;
+  if (datos.estado) updates[5] = datos.estado;
+  _setFila_(sh, fila, updates);
+  return { ok: true };
+}
+
 function getNotasTurno_(datos) {
   const pcF = String(datos.pc || '').trim().toLowerCase();
   const opF = String(datos.operador || '').trim().toLowerCase();
@@ -1973,6 +2208,7 @@ function getNotasTurno_(datos) {
     if (opF && String(v[i][4] || '').trim().toLowerCase() !== opF) continue;
     if (!_enRango_(v[i][0], datos.desde, datos.hasta)) continue;
     out.push({
+      fila: i + 1,
       timestamp: v[i][0], fecha: v[i][1], turno: v[i][2], pc: v[i][3], operador: v[i][4], nota: v[i][5]
     });
   }

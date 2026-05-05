@@ -977,11 +977,26 @@ function renderTareas() {
           <td>${t.fechaCompletada ? escape(fmt(t.fechaCompletada)) : ""}</td>
           <td>${escape(t.completoPor || "")}</td>
           <td class="actions">
+            <button class="btn-sm secondary" onclick="modalEditarTarea(${t.fila})">Editar</button>
             <button class="btn-sm danger" onclick="eliminarTarea(${t.fila})">×</button>
           </td>
         </tr>`;
       }).join("")}</tbody>
     </table>`;
+}
+
+function modalEditarTarea(fila) {
+  const t = _tareasCache.find(x => x.fila === fila);
+  if (!t) return;
+  abrirModal({ titulo: "Editar tarea fila " + fila, campos: [
+    { id: "pc", label: "PC", value: t.pc || "" },
+    { id: "tareaTexto", label: "Tarea", type: "textarea", value: t.tarea || "" },
+    { id: "estado", label: "Estado", type: "select", opciones: ["Pendiente","Completada"], value: t.estado || "Pendiente" }
+  ], onSave: async (vals) => {
+    const r = await api({ action: "editartarea", fila, ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarTareas();
+  }});
 }
 
 function modalNuevaTarea() {
@@ -1040,10 +1055,11 @@ async function cargarNovedades() {
 
   if (!all.length) { box.innerHTML = statsHtml + '<div class="empty-state">Sin novedades.</div>'; return; }
 
+  _novedadesCache = r.novedades;
   box.innerHTML = statsHtml + charts + `
     <table>
       <thead><tr><th>Fecha</th><th>PC</th><th>Operador</th><th>Tipo</th><th>Prioridad</th><th>Detalle</th><th>Estado</th><th>Resolución</th><th></th></tr></thead>
-      <tbody>${r.novedades.map(n => `
+      <tbody>${r.novedades.map((n,i) => `
         <tr>
           <td>${escape(n.fecha)}</td>
           <td><b>${escape(n.pc)}</b></td>
@@ -1055,12 +1071,37 @@ async function cargarNovedades() {
           <td>${escape(n.resolucion || "")}</td>
           <td class="actions">
             <button class="btn-sm" onclick="abrirThreadComentarios('${escape(n.id)}')">💬</button>
+            <button class="btn-sm secondary" onclick="modalEditarNovedad(${i})">Editar</button>
             <button class="btn-sm warning" onclick="cambiarEstadoNovedad('${escape(n.id)}', 'En seguimiento')">Seguimiento</button>
             <button class="btn-sm success" onclick="cambiarEstadoNovedad('${escape(n.id)}', 'Resuelta')">Resolver</button>
             <button class="btn-sm danger" onclick="eliminarNovedad('${escape(n.id)}')">×</button>
           </td>
         </tr>`).join("")}</tbody>
     </table>`;
+}
+
+let _novedadesCache = [];
+
+function modalEditarNovedad(idx) {
+  const n = _novedadesCache[idx];
+  if (!n) return;
+  abrirModal({ titulo: "Editar novedad " + (n.id || "fila " + n.fila), campos: [
+    { id: "fechaTexto", label: "Fecha (YYYY-MM-DD)", value: fmtFecha(n.timestamp) || n.fecha || "" },
+    { id: "operador", label: "Operador", value: n.operador || "" },
+    { id: "turno", label: "Turno", type: "select", opciones: ["TM","TT","TN",""], value: n.turno || "" },
+    { id: "pc", label: "PC", value: n.pc || "" },
+    { id: "tipo", label: "Tipo", type: "select", opciones: ["Diferencia caja","Reclamo","Limpieza","Premio pendiente","Otro"], value: n.tipo || "Otro" },
+    { id: "prioridad", label: "Prioridad", type: "select", opciones: ["Alta","Media","Baja"], value: n.prioridad || "Media" },
+    { id: "detalle", label: "Detalle", type: "textarea", value: n.detalle || "" },
+    { id: "observaciones", label: "Observaciones", type: "textarea", value: n.observaciones || "" },
+    { id: "estado", label: "Estado", type: "select", opciones: ["Pendiente","En seguimiento","Resuelta"], value: n.estado || "Pendiente" },
+    { id: "revisadoPor", label: "Revisado por", value: n.revisadoPor || "" },
+    { id: "resolucion", label: "Resolución", type: "textarea", value: n.resolucion || "" }
+  ], onSave: async (vals) => {
+    const r = await api({ action: "editarnovedadcontenido", fila: n.fila, ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarNovedades();
+  }});
 }
 
 async function cambiarEstadoNovedad(id, estado) {
@@ -1091,12 +1132,13 @@ async function cargarHistorial() {
   if (!r.ok || !r.fichajes || !r.fichajes.length) {
     box.innerHTML = '<div class="empty-state">Sin registros.</div>'; return;
   }
+  _fichajesCache = r.fichajes;
   box.innerHTML = `
     <table><thead><tr>
       <th>Fecha</th><th>Hora</th><th>Operador</th><th>Turno</th><th>PC</th>
-      <th>Acción</th><th>Estado</th><th>Tarde min</th><th>Obs.</th>
+      <th>Acción</th><th>Estado</th><th>Tarde min</th><th>Obs.</th><th></th>
     </tr></thead>
-    <tbody>${r.fichajes.map(f => `<tr>
+    <tbody>${r.fichajes.map((f,i) => `<tr>
       <td>${escape(fmtFecha(f.timestamp) || f.fecha)}</td>
       <td>${escape(fmtHora(f.timestamp) || f.hora)}</td>
       <td><b>${escape(f.nombre)}</b></td>
@@ -1106,7 +1148,43 @@ async function cargarHistorial() {
       <td>${escape(f.estado)}</td>
       <td>${f.minutosTarde ? `<span class="badge red">${escape(f.minutosTarde)} min</span>` : ''}</td>
       <td>${escape(f.observaciones||'')}</td>
+      <td class="actions">
+        <button class="btn-sm secondary" onclick="modalEditarFichaje(${i})">Editar</button>
+        <button class="btn-sm danger" onclick="eliminarFichaje(${f.fila})">×</button>
+      </td>
     </tr>`).join('')}</tbody></table>`;
+}
+
+let _fichajesCache = [];
+
+function modalEditarFichaje(idx) {
+  const f = _fichajesCache[idx];
+  if (!f) return;
+  const fechaStr = fmtFecha(f.timestamp) || f.fecha || "";
+  const horaStr = fmtHora(f.timestamp) || f.hora || "";
+  abrirModal({ titulo: "Editar fichaje fila " + f.fila, campos: [
+    { id: "fechaTexto", label: "Fecha (YYYY-MM-DD)", value: fechaStr },
+    { id: "hora", label: "Hora (HH:MM:SS)", value: horaStr },
+    { id: "nombre", label: "Operador", value: f.nombre },
+    { id: "turno", label: "Turno", type: "select", opciones: ["TM","TT","TN",""], value: f.turno || "" },
+    { id: "pc", label: "PC", value: f.pc || "" },
+    { id: "tipo", label: "Tipo", value: f.tipo || "" },
+    { id: "accion", label: "Acción", type: "select", opciones: ["Ingreso","Salida"], value: f.accion },
+    { id: "estado", label: "Estado", value: f.estado || "" },
+    { id: "minutosTarde", label: "Min tarde", type: "number", value: f.minutosTarde || 0 },
+    { id: "observaciones", label: "Observaciones", type: "textarea", value: f.observaciones || "" }
+  ], onSave: async (vals) => {
+    const r = await api({ action: "editarfichaje", fila: f.fila, ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarHistorial();
+  }});
+}
+
+async function eliminarFichaje(fila) {
+  if (!confirm("¿Eliminar fichaje fila " + fila + "?")) return;
+  const r = await api({ action: "eliminarfichaje", fila });
+  if (!r.ok) return alert(r.error);
+  cargarHistorial();
 }
 
 async function cargarRecepciones() {
@@ -1139,8 +1217,9 @@ async function cargarRecepciones() {
   ]);
 
   if (!total) { box.innerHTML = statsHtml + '<div class="empty-state">Sin recepciones registradas.</div>'; return; }
+  _recepcionesCache = r.recepciones;
 
-  box.innerHTML = statsHtml + r.recepciones.map(re => {
+  box.innerHTML = statsHtml + r.recepciones.map((re, i) => {
     const cajaOk = String(re.cajaOk || "").toLowerCase();
     const cajaBad = cajaOk === "no";
     const waBad   = String(re.whatsappOk  || "").toLowerCase() === "no";
@@ -1162,8 +1241,45 @@ async function cargarRecepciones() {
           <span class="badge gray">Limpieza: ${escape(re.limpieza)}</span>
         </div>
         ${re.observaciones ? `<p class="small" style="margin:8px 0 0;color:#bbb">${escape(re.observaciones)}</p>` : ''}
+        <div class="row" style="margin-top:8px;gap:6px">
+          <button class="btn-sm secondary" onclick="modalEditarRecepcion(${i})">Editar</button>
+          <button class="btn-sm danger" onclick="eliminarRecepcion(${re.fila})">Eliminar</button>
+        </div>
       </div>`;
   }).join('');
+}
+
+let _recepcionesCache = [];
+
+function modalEditarRecepcion(idx) {
+  const re = _recepcionesCache[idx];
+  if (!re) return;
+  abrirModal({ titulo: "Editar recepción fila " + re.fila, campos: [
+    { id: "fechaTexto", label: "Fecha (YYYY-MM-DD)", value: fmtFecha(re.timestamp) || re.fecha || "" },
+    { id: "turno", label: "Turno", type: "select", opciones: ["TM","TT","TN",""], value: re.turno || "" },
+    { id: "pc", label: "PC", value: re.pc || "" },
+    { id: "recibe", label: "Recibe", value: re.recibe || "" },
+    { id: "entrega", label: "Entrega", value: re.entrega || "" },
+    { id: "puestoOrden", label: "Puesto en orden", type: "select", opciones: ["Sí","No"], value: re.puestoOrden || "Sí" },
+    { id: "whatsappOk", label: "WhatsApp OK", type: "select", opciones: ["Sí","No"], value: re.whatsappOk || "Sí" },
+    { id: "cajaOk", label: "Caja OK", type: "select", opciones: ["Sí","No"], value: re.cajaOk || "Sí" },
+    { id: "diferenciaCaja", label: "Diferencia caja", type: "textarea", value: re.diferenciaCaja || "" },
+    { id: "revinculacionOk", label: "Revinculación OK", type: "select", opciones: ["Sí","No"], value: re.revinculacionOk || "Sí" },
+    { id: "telefonosCaidos", label: "Teléfonos caídos (texto libre)", value: re.telefonosCaidos || "" },
+    { id: "limpiezaCumplida", label: "Limpieza", type: "select", opciones: ["Sí","No","No corresponde"], value: re.limpieza || "No corresponde" },
+    { id: "observaciones", label: "Observaciones", type: "textarea", value: re.observaciones || "" }
+  ], onSave: async (vals) => {
+    const r = await api({ action: "editarrecepcion", fila: re.fila, ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarRecepciones();
+  }});
+}
+
+async function eliminarRecepcion(fila) {
+  if (!confirm("¿Eliminar recepción fila " + fila + "?")) return;
+  const r = await api({ action: "eliminarrecepcion", fila });
+  if (!r.ok) return alert(r.error);
+  cargarRecepciones();
 }
 
 async function cargarPausas() {
@@ -1204,13 +1320,14 @@ async function cargarPausas() {
 
   if (!all.length) { box.innerHTML = statsHtml + '<div class="empty-state">Sin pausas registradas.</div>'; return; }
 
+  _pausasCache = all;
   const iconos = { bano: "🚽", fumar: "🚬", limpieza: "🧹" };
   box.innerHTML = statsHtml + charts + `
     <table><thead><tr>
       <th>Fecha</th><th>Tipo</th><th>Operador</th><th>PC</th>
-      <th>Salida</th><th>Regreso</th><th>Min</th><th>Excedió</th><th>Estado</th>
+      <th>Salida</th><th>Regreso</th><th>Min</th><th>Excedió</th><th>Estado</th><th></th>
     </tr></thead>
-    <tbody>${r.pausas.map(p => {
+    <tbody>${r.pausas.map((p,i) => {
       const excedio = String(p.excedio || '').toLowerCase();
       const excedioSi = excedio === 'sí' || excedio === 'si';
       return `<tr>
@@ -1223,8 +1340,42 @@ async function cargarPausas() {
         <td>${escape(p.minutos)}</td>
         <td><span class="badge ${excedioSi?'red':'green'}">${escape(p.excedio)}</span></td>
         <td><span class="badge ${p.estado==='Abierta'?'yellow':'gray'}">${escape(p.estado)}</span></td>
+        <td class="actions">
+          <button class="btn-sm secondary" onclick="modalEditarPausa(${i})">Editar</button>
+          <button class="btn-sm danger" onclick="eliminarPausa(${p.fila}, '${escape(p.tipoPausa)}')">×</button>
+        </td>
       </tr>`;
     }).join('')}</tbody></table>`;
+}
+
+let _pausasCache = [];
+
+function modalEditarPausa(idx) {
+  const p = _pausasCache[idx];
+  if (!p) return;
+  abrirModal({ titulo: "Editar pausa fila " + p.fila + " (" + p.tipoPausa + ")", campos: [
+    { id: "fechaTexto", label: "Fecha (YYYY-MM-DD)", value: fmtFecha(p.timestamp) || p.fecha || "" },
+    { id: "operador", label: "Operador", value: p.operador || "" },
+    { id: "turno", label: "Turno", type: "select", opciones: ["TM","TT","TN",""], value: p.turno || "" },
+    { id: "pc", label: "PC", value: p.pc || "" },
+    { id: "horaSalida", label: "Hora salida (HH:MM:SS)", value: fmtHora(p.horaSalida) || "" },
+    { id: "horaRegreso", label: "Hora regreso (HH:MM:SS, vacío = abierta)", value: fmtHora(p.horaRegreso) || "" },
+    { id: "minutos", label: "Minutos", type: "number", value: p.minutos || 0 },
+    { id: "excedio", label: "Excedió", type: "select", opciones: ["No","Sí",""], value: p.excedio || "" },
+    { id: "estado", label: "Estado", type: "select", opciones: ["Abierta","Cerrada","Cerrada (auto)"], value: p.estado || "" },
+    { id: "observaciones", label: "Observaciones", type: "textarea", value: p.observaciones || "" }
+  ], onSave: async (vals) => {
+    const r = await api({ action: "editarpausaadmin", fila: p.fila, tipoPausa: p.tipoPausa, ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarPausas();
+  }});
+}
+
+async function eliminarPausa(fila, tipoPausa) {
+  if (!confirm("¿Eliminar pausa " + tipoPausa + " fila " + fila + "?")) return;
+  const r = await api({ action: "eliminarpausa", fila, tipoPausa });
+  if (!r.ok) return alert(r.error);
+  cargarPausas();
 }
 
 // =========== NOTAS DE TURNO ===========
@@ -1239,18 +1390,48 @@ async function cargarNotas() {
   const r = await api({ action: "getnotasturno", pc, operador, desde, hasta });
   if (!r.ok) { box.innerHTML = '<div class="empty-state">Error.</div>'; return; }
   if (!r.notas.length) { box.innerHTML = '<div class="empty-state">Sin notas.</div>'; return; }
+  _notasCache = r.notas;
   box.innerHTML = `
     <table>
-      <thead><tr><th>Fecha</th><th>Turno</th><th>PC</th><th>Operador</th><th>Nota</th></tr></thead>
-      <tbody>${r.notas.map(n => `
+      <thead><tr><th>Fecha</th><th>Turno</th><th>PC</th><th>Operador</th><th>Nota</th><th></th></tr></thead>
+      <tbody>${r.notas.map((n,i) => `
         <tr>
           <td>${escape(fmt(n.timestamp))}</td>
           <td>${escape(n.turno)}</td>
           <td><b>${escape(n.pc)}</b></td>
           <td>${escape(n.operador)}</td>
           <td style="white-space:pre-wrap">${escape(n.nota)}</td>
+          <td class="actions">
+            <button class="btn-sm secondary" onclick="modalEditarNota(${i})">Editar</button>
+            <button class="btn-sm danger" onclick="eliminarNota(${n.fila})">×</button>
+          </td>
         </tr>`).join("")}</tbody>
     </table>`;
+}
+
+let _notasCache = [];
+
+function modalEditarNota(idx) {
+  const n = _notasCache[idx];
+  if (!n) return;
+  abrirModal({ titulo: "Editar nota fila " + n.fila, campos: [
+    { id: "fechaTexto", label: "Fecha (YYYY-MM-DD)", value: fmtFecha(n.timestamp) || n.fecha || "" },
+    { id: "turno", label: "Turno", type: "select", opciones: ["TM","TT","TN",""], value: n.turno || "" },
+    { id: "pc", label: "PC", value: n.pc || "" },
+    { id: "operador", label: "Operador", value: n.operador || "" },
+    { id: "nota", label: "Nota", type: "textarea", value: n.nota || "" }
+  ], onSave: async (vals) => {
+    const r = await api({ action: "editarnotaturno", fila: n.fila, ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarNotas();
+  }});
+}
+
+async function eliminarNota(fila) {
+  if (!confirm("¿Eliminar nota fila " + fila + "?")) return;
+  const r = await api({ action: "eliminarnotaturno", fila });
+  if (!r.ok) return alert(r.error);
+  cargarNotas();
 }
 
 // =========== LOG TELÉFONOS GLOBAL ===========
@@ -1288,14 +1469,15 @@ async function cargarLogTel() {
 
   if (!all.length) { box.innerHTML = statsHtml + '<div class="empty-state">Sin caídas registradas.</div>'; return; }
 
+  _logTelCache = all;
   box.innerHTML = statsHtml + charts + `
     <table>
       <thead><tr>
         <th>Fecha</th><th>PC</th><th>Línea</th>
         <th>Caída</th><th>Operador</th><th>Motivo</th>
-        <th>Levantado</th><th>Duración</th><th>Por</th><th>Estado</th>
+        <th>Levantado</th><th>Duración</th><th>Por</th><th>Estado</th><th></th>
       </tr></thead>
-      <tbody>${all.map(e => `
+      <tbody>${all.map((e,i) => `
         <tr>
           <td>${escape(fmtFecha(e.timestamp))}</td>
           <td><b>${escape(e.pc)}</b></td>
@@ -1307,8 +1489,41 @@ async function cargarLogTel() {
           <td>${e.duracion ? e.duracion + ' min' : ''}</td>
           <td>${escape(e.operadorLevanta || '')}</td>
           <td><span class="badge ${e.estado==='Cerrada'?'green':'red'}">${escape(e.estado)}</span></td>
+          <td class="actions">
+            <button class="btn-sm secondary" onclick="modalEditarLogTel(${i})">Editar</button>
+            <button class="btn-sm danger" onclick="eliminarLogTel(${e.fila})">×</button>
+          </td>
         </tr>`).join("")}</tbody>
     </table>`;
+}
+
+let _logTelCache = [];
+
+function modalEditarLogTel(idx) {
+  const e = _logTelCache[idx];
+  if (!e) return;
+  abrirModal({ titulo: "Editar caída tel. fila " + e.fila, campos: [
+    { id: "pc", label: "PC", value: e.pc || "" },
+    { id: "linea", label: "Línea", value: e.linea || "" },
+    { id: "horaCaida", label: "Hora caída (HH:MM:SS)", value: fmtHora(e.horaCaida) || "" },
+    { id: "operadorCaida", label: "Operador (caída)", value: e.operadorCaida || "" },
+    { id: "motivo", label: "Motivo", type: "textarea", value: e.motivo || "" },
+    { id: "horaLevantado", label: "Hora levantado (HH:MM:SS, vacío = abierta)", value: fmtHora(e.horaLevantado) || "" },
+    { id: "duracion", label: "Duración (min)", type: "number", value: e.duracion || 0 },
+    { id: "operadorLevanta", label: "Operador (levanta)", value: e.operadorLevanta || "" },
+    { id: "estado", label: "Estado", type: "select", opciones: ["Abierta","Cerrada"], value: e.estado || "Abierta" }
+  ], onSave: async (vals) => {
+    const r = await api({ action: "editarlogtel", fila: e.fila, ...vals });
+    if (!r.ok) return alert(r.error);
+    cerrarModal(); cargarLogTel();
+  }});
+}
+
+async function eliminarLogTel(fila) {
+  if (!confirm("¿Eliminar entrada de log fila " + fila + "?")) return;
+  const r = await api({ action: "eliminarlogtel", fila });
+  if (!r.ok) return alert(r.error);
+  cargarLogTel();
 }
 
 // =========== COMENTARIOS NOVEDADES ===========
