@@ -878,15 +878,22 @@ function getLimpiezaHoy_() {
     (Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate())) / (24 * 3600 * 1000)
   );
   const n = r.pcs.length;
+  const turnoOffset = _getTurnoOffset_();
+  const turnos = ['TM', 'TT', 'TN'];
+
   const hoy    = r.pcs[((dia     % n) + n) % n];
-  const manana = r.pcs[((dia + 1 % n) + n) % n];
+  const manana = r.pcs[(((dia + 1) % n) + n) % n];
+  const turnoHoy    = turnos[(((dia + turnoOffset) % 3) + 3) % 3];
+  const turnoManana = turnos[(((dia + 1 + turnoOffset) % 3) + 3) % 3];
 
   return {
-    ok:      true,
-    pc:      hoy.pc,
-    fecha:   fecha_(ahora),
-    manana:  manana.pc,
-    rotacion: r.pcs.map(p => p.pc)
+    ok:           true,
+    pc:           hoy.pc,
+    turno:        turnoHoy,
+    fecha:        fecha_(ahora),
+    manana:       manana.pc,
+    turnoManana:  turnoManana,
+    rotacion:     r.pcs.map(p => p.pc)
   };
 }
 

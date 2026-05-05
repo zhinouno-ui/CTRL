@@ -395,9 +395,9 @@
     </div>
 
     <!-- AVISO LIMPIEZA -->
-    <div class="card hidden" id="limpiezaAvisoCard">
+    <div class="card" id="limpiezaAvisoCard">
       <h3>🧹 Cronograma de limpieza</h3>
-      <div id="limpiezaAvisoBox"></div>
+      <div id="limpiezaAvisoBox">Cargando...</div>
     </div>
 
     <!-- ACCIONES -->
@@ -789,23 +789,44 @@
 
   async function cargarLimpiezaHoy() {
     const r = await api({ action: "getlimpiezahoy" });
-    const card = document.getElementById("limpiezaAvisoCard");
-    const box  = document.getElementById("limpiezaAvisoBox");
-    if (!r.ok || !r.pc) { card.classList.add("hidden"); return; }
+    const box = document.getElementById("limpiezaAvisoBox");
+    if (!r.ok || !r.pc) { box.innerHTML = ""; return; }
 
     const meToca = String(r.pc).toLowerCase() === String(operador.pc || "").toLowerCase();
+    const turnoLabel = r.turno || "";
+    const turnoColor = turnoLabel === "TM" ? "#3eb368" : (turnoLabel === "TT" ? "#f0b429" : "#5c9be8");
+
     const mananaInfo = r.manana
-      ? `<div class="small" style="margin-top:6px">Mañana limpia <b>${r.manana}</b></div>`
+      ? `<div class="small" style="margin-top:8px;color:#bbb">
+           Mañana: <b>${r.manana}</b>
+           ${r.turnoManana ? `<span style="background:${r.turnoManana==='TM'?'#1a4a2e':r.turnoManana==='TT'?'#4a3a00':'#1a2f4a'};color:${r.turnoManana==='TM'?'#3eb368':r.turnoManana==='TT'?'#f0b429':'#5c9be8'};padding:2px 8px;border-radius:4px;font-size:12px;margin-left:4px">${r.turnoManana}</span>` : ""}
+         </div>` : "";
+
+    const rotacion = r.rotacion && r.rotacion.length
+      ? `<div class="small" style="margin-top:6px;color:#666">Rotación: ${r.rotacion.join(" → ")}</div>`
       : "";
 
-    box.innerHTML = meToca
-      ? `<div class="alert">Hoy <b>${r.pc}</b> tiene la limpieza — te toca a vos.</div>
-         ${mananaInfo}
-         <span class="small">Rotación: ${r.rotacion.join(" → ")}</span>`
-      : `<div class="alert ok">Hoy limpia <b>${r.pc}</b>.</div>
-         ${mananaInfo}
-         <span class="small">Rotación: ${r.rotacion.join(" → ")}</span>`;
-    card.classList.remove("hidden");
+    if (meToca) {
+      box.innerHTML = `
+        <div style="background:#3a1a00;border-left:4px solid #f0b429;padding:12px 16px;border-radius:8px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:18px">🧹</span>
+            <span style="font-size:15px;font-weight:bold">Hoy te toca limpiar a vos — PC <span style="color:#f0b429">${r.pc}</span></span>
+            <span style="background:${turnoColor === '#3eb368' ? '#1a4a2e' : turnoColor === '#f0b429' ? '#4a3a00' : '#1a2f4a'};color:${turnoColor};padding:3px 10px;border-radius:4px;font-size:13px;font-weight:bold">${turnoLabel}</span>
+          </div>
+          ${mananaInfo}${rotacion}
+        </div>`;
+    } else {
+      box.innerHTML = `
+        <div style="background:#1a2a1a;border-left:4px solid #3eb368;padding:12px 16px;border-radius:8px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:18px">🧹</span>
+            <span style="font-size:15px">Hoy limpia <b style="color:#3eb368">${r.pc}</b></span>
+            <span style="background:${turnoLabel === 'TM' ? '#1a4a2e' : turnoLabel === 'TT' ? '#4a3a00' : '#1a2f4a'};color:${turnoColor};padding:3px 10px;border-radius:4px;font-size:13px;font-weight:bold">${turnoLabel}</span>
+          </div>
+          ${mananaInfo}${rotacion}
+        </div>`;
+    }
   }
 
   function _telefsKey() { return "telefsEstado_" + (operador.pc || ""); }
