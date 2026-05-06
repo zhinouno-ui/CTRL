@@ -354,16 +354,6 @@
 </head>
 
 <body>
-<script>
-(function(){
-  var ua = navigator.userAgent || '';
-  var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)
-    || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(ua));
-  if (isMobile) {
-    document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:#111;color:#fff;text-align:center;padding:30px;font-family:Arial,sans-serif"><div style="font-size:64px;margin-bottom:20px">🖥️</div><h2 style="margin:0 0 12px;font-size:22px">Solo disponible en PC</h2><p style="color:#888;font-size:15px;line-height:1.6;max-width:300px">Esta aplicación está diseñada para uso en computadora.<br>Accedé desde un navegador de escritorio.</p></div>';
-  }
-})();
-</script>
 <div class="container">
 
   <!-- LOGIN -->
@@ -1209,12 +1199,23 @@
     });
 
     if (!r.ok) {
-      setMsg("accionMsg", r.error || "Error.");
       if (r.bloqueoCruzado) alert("⚠️ " + r.error);
+      // Si el server dice "no hay pausa abierta" pero el local cree que sí,
+      // el estado local está desincronizado → resincronizar desde el server
+      const errLow = String(r.error || "").toLowerCase();
+      if (abierta && errLow.indexOf("no hay pausa") !== -1) {
+        if (clave === "bano") pausaBano = false;
+        else if (clave === "fumar") pausaFumar = false;
+        else pausaLimpieza = false;
+        _msgAnim("accionMsg", "Estado resincronizado — la pausa ya estaba cerrada.", "ok");
+        // Re-sincronizar desde server por las dudas
+        sincronizarEstadoPausas();
+      } else {
+        _msgAnim("accionMsg", r.error || "Error.", "err");
+      }
       ["banoBtn","fumarBtn","limpiezaBtn","fwBanoBtn","fwFumarBtn","fwLimpiezaBtn"].forEach(id => {
         const el = document.getElementById(id); if (el) el.classList.remove("btn-syncing");
       });
-      _msgAnim("accionMsg", r.error || "Error.", "err");
       _pausaEnCurso = false;
       actualizarBotones();
       return;
@@ -1442,7 +1443,7 @@
     const wrap = document.getElementById("nota-" + id);
     const nota = wrap ? wrap.querySelector("textarea").value.trim() : "";
     const confirmar = _animBtn(btn, "📝 Guardando nota...");
-    const r = await api({ action: "notarnovedad", id, nota });
+    const r = await api({ action: "notarnovedad", id, nota, nombre: operador.nombre });
     if (r.ok) {
       confirmar(true, "✓ Nota guardada");
       setTimeout(() => { if (wrap) wrap.style.display = "none"; cargarNovedades(); }, 800);
@@ -1576,6 +1577,7 @@
     }
     const yoBajo = (operador.nombre || "").toLowerCase();
     let huboNuevos = false;
+    let mensajesAjenosNuevos = 0;
     r.mensajes.forEach(m => {
       if (!m.timestamp) return;
       // Skip mensajes propios ya renderizados optimistamente
@@ -1600,8 +1602,13 @@
       box.appendChild(div);
       _chatUltimoTs = m.timestamp;
       huboNuevos = true;
+      if (!esMio) mensajesAjenosNuevos++;
     });
     if (huboNuevos) box.scrollTop = box.scrollHeight;
+    // Notificar en título de pestaña SOLO si hay mensajes ajenos y la carga es silenciosa (poll, no carga inicial)
+    if (mensajesAjenosNuevos > 0 && silencioso) {
+      _notificarTituloTab("💬 " + mensajesAjenosNuevos + " mensaje" + (mensajesAjenosNuevos > 1 ? "s" : ""));
+    }
   }
 
   async function chatEnviar() {
@@ -1812,15 +1819,48 @@
       } else if (r && r.ok === true) {
         _verifFails = 0;
         cargarNovedades(r.novedades);
+        // Detectar tareas nuevas para notificar
+        const cantTareasAntes = _tareasPendientesCount || 0;
         cargarTareas({ tareas: r.tareas, ultimaCompletada: r.ultimaCompletada });
+        if ((r.tareas || []).length > cantTareasAntes) _notificarTituloTab("⚡ Nueva tarea");
         cargarMisNovedades(r.misNovedades);
-        // Refrescar estado de teléfonos cada 30s para detectar caídas de otros operadores
         actualizarEstadoTelefonos();
+        // Resincronizar estado de pausas para evitar desync (botón verde sin pausa abierta)
+        if (!_pausaEnCurso) sincronizarEstadoPausas();
       }
     } catch (e) {
       _verifFails = 0;
     }
   }, 30000);
+
+  // Notificaciones en el título de la pestaña (visibles aunque esté minimizada)
+  const _tituloOriginal = document.title;
+  let _tituloNotifs = 0;
+  let _tituloTimer = null;
+
+  function _notificarTituloTab(prefijo) {
+    if (document.hasFocus()) return; // si ya está mirando la pestaña, no molestar
+    _tituloNotifs++;
+    const txt = (prefijo || "🔔") + " (" + _tituloNotifs + ") " + _tituloOriginal;
+    document.title = txt;
+    // Parpadeo: alternar entre dos versiones para que llame la atención
+    if (_tituloTimer) return;
+    _tituloTimer = setInterval(() => {
+      document.title = (document.title === txt) ? ("● " + txt) : txt;
+    }, 1500);
+  }
+
+  function _resetearTituloTab() {
+    _tituloNotifs = 0;
+    if (_tituloTimer) { clearInterval(_tituloTimer); _tituloTimer = null; }
+    document.title = _tituloOriginal;
+  }
+
+  // Cuando el usuario vuelve a la pestaña, limpiar las notificaciones
+  window.addEventListener("focus", _resetearTituloTab);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) _resetearTituloTab();
+  });
 
   // Notificaciones horarias (toast no-bloqueante)
   function mostrarToast(mensaje, tipo) {

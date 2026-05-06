@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m ' *)",
+      "Bash(git pull *)",
+      "Bash(git rm *)",
+      "Bash(git rebase *)",
+      "Bash(git commit -m 'Fix caché en API calls para que cambiarPin ejecute siempre *)",
+      "Bash(git commit -m 'Agrega debug a cambiarPin para diagnosticar el error *)",
+      "Bash(git commit -m 'Fuerza flush + verificacion lectura, detecta deployment desactualizado *)",
+      "Bash(grep -E '\\\\.\\(html|gs|index\\)$')",
+      "Bash(git checkout *)",
+      "Bash(git commit *)",
+      "Bash(git stash *)"
+    ]
+  }
+}

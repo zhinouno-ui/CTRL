@@ -1271,10 +1271,13 @@ function notarNovedad_(datos) {
 
   const sh = hoja_(HOJAS.NOVEDADES);
   const values = sh.getDataRange().getValues();
+  const autor = String(datos.nombre || '').trim();
 
   for (let i = 3; i < values.length; i++) {
     if (String(values[i][10] || '').trim() !== idBuscado) continue;
     sh.getRange(i + 1, 14).setValue(datos.nota || '');
+    // Si vino el autor, escribirlo en col 13 (revisadoPor) para no perder atribución
+    if (autor) sh.getRange(i + 1, 13).setValue(autor);
     SpreadsheetApp.flush();
     return { ok: true };
   }
