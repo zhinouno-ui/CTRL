@@ -350,6 +350,14 @@
     .fw-btn-bano     { background: #1a73e8; }
     .fw-btn-fumar    { background: #5f6368; }
     .fw-btn-limpieza { background: #ad7c00; }
+    .fw-btn-cargas   { background: #16a765; }
+
+    #floatWidget .fw-main-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      justify-content: flex-end;
+    }
   </style>
 </head>
 
@@ -573,7 +581,13 @@
       <span class="fw-tooltip" id="fwLimpiezaTip">Limpieza</span>
     </button>
   </div>
-  <button class="fw-gear" id="fwGear" onclick="fwToggle()">⚙️</button>
+  <div class="fw-main-row">
+    <button class="fw-btn fw-btn-cargas" id="fwCargasBtn" onclick="abrirCargasAutomaticas()">
+      💰
+      <span class="fw-tooltip">Cargas automatizadas</span>
+    </button>
+    <button class="fw-gear" id="fwGear" onclick="fwToggle()">⚙️</button>
+  </div>
 </div>
 
 <script>
@@ -1903,6 +1917,24 @@
   function fwToggle() {
     fwOpen = !fwOpen;
     fwActions.classList.toggle("hidden", !fwOpen);
+  }
+
+  async function abrirCargasAutomaticas() {
+    const url = "https://bo.casinodrex.com/agents/user_search";
+
+    if (window.ctrlElectron && typeof window.ctrlElectron.openAgentWindow === "function") {
+      const r = await window.ctrlElectron.openAgentWindow(url);
+      if (r && r.ok === false) mostrarToast(r.error || "No se pudo abrir la ventana de agentes.", "error");
+      return;
+    }
+
+    const w = window.open(url, "_blank", "noopener,noreferrer");
+    if (!w) {
+      mostrarToast("Habilitá las ventanas emergentes para abrir cargas automatizadas.", "warning");
+      return;
+    }
+
+    mostrarToast("Abrimos Agentes. Si pide sesión, iniciá sesión manualmente y luego usá la automatización.", "warning");
   }
 
   // Drag
